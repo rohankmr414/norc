@@ -13,7 +13,7 @@ data["build"] = {
     "appId": "com.cron.electron",
     "productName": "CronCal",
     "linux": {
-        "target": ["deb", "pacman"],
+        "target": ["deb"],
         "category": "Office",
         "artifactName": "Cron-${version}.${ext}",
         "desktop": {
