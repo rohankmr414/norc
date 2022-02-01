@@ -2,6 +2,7 @@ import json
 
 with open('out/package.json') as json_file:
     data = json.load(json_file)
+
 data["name"] = "cron-cal"
 data["devDependencies"] = {"electron": "^17.0.0", "electron-builder": "^22.14.5"}
 data["scripts"] = {

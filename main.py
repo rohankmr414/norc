@@ -1,4 +1,4 @@
-import urllib3
+from urllib3 import PoolManager
 import shutil
 import os
 from os.path import dirname as up
@@ -8,7 +8,7 @@ from distutils.dir_util import copy_tree
 url = "https://download.cron.com/mac/dmg/x64"
 path = up(os.path.abspath(__file__))
 cron_dmg = path + "/cron.dmg"
-http = urllib3.PoolManager()
+http = PoolManager()
 
 with http.request('GET', url, preload_content=False) as r, open(cron_dmg, 'wb') as out_file:
     shutil.copyfileobj(r, out_file)
