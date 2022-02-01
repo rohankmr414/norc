@@ -34,12 +34,11 @@ jobs:
           npm run build
       - uses: marvinpinto/action-automatic-releases@v1.2.1
         with:
-          working-directory: ./out
           repo_token: "${{secrets.GITHUB_TOKEN }}"
           automatic_release_tag: "latest"
           prerelease: true
           title: "Cron Build"
           files: |
-            *.deb
+            ./out/release/*.deb
 
 
