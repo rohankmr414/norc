@@ -29,8 +29,8 @@ jobs:
         run: python patch.py
      
       - name: Install dev dependencies and build
-        working-directory: ./out
         run: |
+          cd out
           npm install --only=dev
           npm run build
       - uses: marvinpinto/action-automatic-releases@v1.2.1
