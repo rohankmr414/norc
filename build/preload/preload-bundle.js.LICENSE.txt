@@ -1,1 +1,0 @@
-/*! Copyright © 2022 Cron Inc. All rights reserved. */

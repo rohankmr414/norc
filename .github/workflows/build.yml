@@ -1,0 +1,44 @@
+name: Python package
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.10]
+        node-version: [16.x]
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Download and patch
+        run: |
+          python3 main.py
+          python3 patch.py
+      - name: Set up Node js ${{ matrix.node-version
+        uses: actions/setup-node@v2
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Install dev dependencies and build
+        working-directory: ./out
+        run: |
+          npm install --only=dev
+          npm run build
+      - uses: marvinpinto/action-automatic-releases@v1.2.1
+        with:
+          working-directory: ./out/release/
+          repo_token: "${{secrets.GITHUB_TOKEN }}"
+          automatic_release_tag: "latest"
+          prerelease: true
+          title: "Cron Build"
+          files: |
+            *.deb
+            *.pacman
+
+
