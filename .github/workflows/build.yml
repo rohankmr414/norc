@@ -22,11 +22,14 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - name: Install package
-        run: python -m pip install --upgrade pip urllib3
+        run: pip install -r requirements.txt
       - name: Download and extract app.asar
         run: python main.py
-      - name: patch package.json
+      - name: patch files
         run: python patch.py
+      - name: Install pacman dependencies
+        run: |
+          sudo apt-get install libarchive-tools
       - name: Install dev dependencies and build
         run: |
           cd out
@@ -40,5 +43,7 @@ jobs:
           title: "Cron Build"
           files: |
             ./out/release/*.deb
+            ./out/release/*.pacman
+
 
 
