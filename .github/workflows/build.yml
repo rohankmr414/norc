@@ -29,8 +29,7 @@ jobs:
         run: python patch.py
       - name: Install pacman dependencies
         run: |
-          sudo apt install libarchive-tools
-          sudo apt install bsdtar
+          sudo apt-get install libarchive-tools
       - name: Install dev dependencies and build
         run: |
           cd out
