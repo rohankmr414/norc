@@ -43,11 +43,9 @@ data["build"] = {
 with open('out/package.json', 'w') as json_file:
     json.dump(data, json_file)
 
+
 with open('out/build/main/main.js', 'r') as file:
     file_data = file.read()
-
-original_words = ("win32", "darwin", "development")
-patched_words = ("linux", "linux", "production")
 
 file_data = file_data.replace("win32", "linux")
 file_data = file_data.replace("darwin", "linux")
@@ -55,3 +53,4 @@ file_data = file_data.replace("development", "production")
 
 with open('out/build/main/main.js', 'w') as file:
     file.write(file_data)
+
