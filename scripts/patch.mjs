@@ -4,8 +4,9 @@ import {
   ROOT, TARGETS, artifactNames, cli, exists, parseOptions, readJson, validateVersion, writeJson,
 } from "./common.mjs";
 
-function replaceOnce(source, pattern, replacement, description) {
+function replaceOnce(source, pattern, replacement, description, appliedPattern) {
   const count = [...source.matchAll(pattern)].length;
+  if (count === 0 && appliedPattern && [...source.matchAll(appliedPattern)].length === 1) return source;
   if (count !== 1) throw new Error(`Upstream ${description} changed: expected one match, found ${count}`);
   return source.replace(pattern, replacement);
 }
@@ -29,6 +30,18 @@ export async function patchApp({ output, arch = "x64" }) {
     preloadSource = replaceOnce(preloadSource, /usesNativeMacOsTrafficLight:!0/g,
       "usesNativeMacOsTrafficLight:!1", "traffic-light configuration");
   }
+  // Apply these independently so --reuse also upgrades previously patched apps.
+  // macOS panels are ordinary windows on Linux. A non-focusable notification
+  // avoids GNOME's focus-stealing protection and its "is ready" prompt.
+  mainSource = replaceOnce(mainSource, /type:([`"'])panel\1,alwaysOnTop:!0/g,
+    "type:process.platform===`linux`?`notification`:`panel`,alwaysOnTop:!0", "reminder window type",
+    /type:process\.platform===`linux`\?`notification`:`panel`,alwaysOnTop:!0/g);
+  mainSource = replaceOnce(mainSource, /return process\.platform===([`"'])darwin\1\?!([\w$]+):!0/g,
+    "return process.platform===`linux`?!1:process.platform===`darwin`?!$2:!0", "reminder focus policy",
+    /return process\.platform===`linux`\?!1:process\.platform===`darwin`\?![\w$]+:!0/g);
+  mainSource = replaceOnce(mainSource, /\((?:process\.platform===`linux`\?`topLeft`:)?process\.platform===([`"'])darwin\1\?([`"'])topRight\2:([`"'])bottomRight\3\)/g,
+    "(process.platform===`linux`?`topRight`:process.platform===`darwin`?`topRight`:`bottomRight`)", "reminder default corner",
+    /\(process\.platform===`linux`\?`topRight`:process\.platform===`darwin`\?`topRight`:`bottomRight`\)/g);
   Object.assign(data, {
     name: "norc", productName: "Norc", desktopName: "norc.desktop", version,
     description: "Unofficial Notion Calendar desktop app for Linux",

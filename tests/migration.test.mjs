@@ -3,11 +3,14 @@ import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promis
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import vm from "node:vm";
 import { buildApp } from "../scripts/build.mjs";
 import { artifactNames, readJson, writeJson } from "../scripts/common.mjs";
 import { extractIcons, prepareApp } from "../scripts/extract.mjs";
 import { patchApp } from "../scripts/patch.mjs";
 import { syncIcons } from "../scripts/icons.mjs";
+
+const reminderSource = 'const fullScreen=false;function reminderOptions(){return {type:`panel`,alwaysOnTop:!0,focusable:reminderFocusable()}}function reminderFocusable(){return process.platform===`darwin`?!fullScreen:!0}function reminderPosition(position){return position??(process.platform===`darwin`?`topRight`:`bottomRight`)}';
 
 async function fixture(t) {
   const output = await mkdtemp(path.join(os.tmpdir(), "norc-test-"));
@@ -20,7 +23,7 @@ async function fixture(t) {
   });
   await writeJson(path.join(output, ".norc-upstream.json"), { version: "1.139.0", electronVersion: "41.5.0" });
   await writeFile(path.join(output, "build/main/main.js"),
-    'const options={title:`Cron`};process.platform===`darwin`;process.platform===`win32`;');
+    'const options={title:`Cron`};process.platform===`darwin`;process.platform===`win32`;' + reminderSource);
   await writeFile(path.join(output, "build/preload/preload-bundle.js"),
     'const windows=process.platform===`win32`;const api={usesNativeMacOsTrafficLight:!0};');
   return output;
@@ -60,12 +63,55 @@ test("patching can be repeated or upgraded without losing the upstream version",
   const first = await snapshot(output);
   await patchApp({ output });
   assert.deepEqual(await snapshot(output), first);
+  const main = path.join(output, "build/main/main.js");
+  await writeFile(main, (await readFile(main, "utf8")).replace('process.platform===`linux`?`topRight`:', 'process.platform===`linux`?`topLeft`:'));
+  await patchApp({ output });
+  assert.deepEqual(await snapshot(output), first);
   await writeJson(path.join(output, ".norc-upstream.json"), { version: "1.140.0", electronVersion: "41.5.0" });
   await patchApp({ output, arch: "arm64" });
   const data = await readJson(path.join(output, "package.json"));
   assert.equal(data.version, "1.140.0");
   assert.equal(data.build.rpm.artifactName, "norc-1.140.0-1.aarch64.rpm");
   assert.equal((await readJson(path.join(output, "build/main/upstream.json"))).version, "1.140.0");
+});
+test("Linux reminders use non-focusable notification windows and default to top right", async (t) => {
+  const output = await fixture(t);
+  await patchApp({ output });
+  const source = await readFile(path.join(output, "build/main/main.js"), "utf8");
+  for (const [platform, type, focusable, position] of [
+    ["linux", "notification", false, "topRight"],
+    ["darwin", "panel", true, "topRight"],
+    ["win32", "panel", true, "bottomRight"],
+  ]) {
+    const context = vm.createContext({ process: { platform } });
+    vm.runInContext(source, context);
+    const options = vm.runInContext("reminderOptions()", context);
+    assert.equal(options.type, type);
+    assert.equal(options.focusable, focusable);
+    assert.equal(options.alwaysOnTop, true);
+    assert.equal(vm.runInContext("reminderPosition()", context), position);
+    assert.equal(vm.runInContext('reminderPosition("topCenter")', context), "topCenter");
+  }
+});
+test("reusing an older Norc extraction upgrades its reminder windows", async (t) => {
+  const output = await fixture(t);
+  await writeFile(path.join(output, "build/main/linux.js"), "// Previous Norc bridge");
+  const main = path.join(output, "build/main/main.js");
+  await writeFile(main, (await readFile(main, "utf8")).replace('title:`Cron`', 'title:`Norc`'));
+  await patchApp({ output });
+  const context = vm.createContext({ process: { platform: "linux" } });
+  vm.runInContext(await readFile(main, "utf8"), context);
+  assert.equal(vm.runInContext("reminderOptions().type", context), "notification");
+  assert.equal(vm.runInContext("reminderFocusable()", context), false);
+  assert.equal(vm.runInContext("reminderPosition()", context), "topRight");
+});
+test("an unexpected reminder layout fails before writing any changes", async (t) => {
+  const output = await fixture(t);
+  const main = path.join(output, "build/main/main.js");
+  await writeFile(main, (await readFile(main, "utf8")).replace('type:`panel`', 'type:`changed`'));
+  const before = await snapshot(output);
+  await assert.rejects(patchApp({ output }), /reminder window type changed/);
+  assert.deepEqual(await snapshot(output), before);
 });
 test("an unexpected upstream layout fails before writing any changes", async (t) => {
   const output = await fixture(t);
