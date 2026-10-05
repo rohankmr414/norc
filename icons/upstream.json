@@ -1,0 +1,30 @@
+{
+  "version": "1.139.0",
+  "dmgSha256": "32f3a7203c8d9b9b7a27de5a7a1ef65e18e0fa030c754003b1b51ddff0cb7c11",
+  "assets": [
+    {
+      "name": "icon_32x32.png",
+      "sha256": "73ccff20c3695201046a8986bbbe2ba5436c4c9615e60a76e6c5d4787e970388"
+    },
+    {
+      "name": "icon_64x64.png",
+      "sha256": "5e6d0d1c1c536e931685a8749ab4faa569fc2c63de11badc9915a501614cd351"
+    },
+    {
+      "name": "icon_128x128.png",
+      "sha256": "fb7f3e665b497898cda160715c02c35bc2e486128e31369b338474f37badbd11"
+    },
+    {
+      "name": "icon_256x256.png",
+      "sha256": "735e76fd5a8aa2fcebe72d9eaaf24b63e5f2c2a48aad84fd895a5f95ad890033"
+    },
+    {
+      "name": "icon_512x512.png",
+      "sha256": "0c6895b9c11a5111407836306bb1b62d72c1b0d478fb57f5faad5fcc3ed2d795"
+    },
+    {
+      "name": "icon_1024x1024.png",
+      "sha256": "52d963f307fec5e09bc03356596e58975fd48e2c54d8939983da62f858cf66f4"
+    }
+  ]
+}

@@ -1,49 +1,74 @@
-name: Norc
+name: Norc Linux
 
-on: [push]
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.10']
-        node-version: [16.x]
-
     steps:
-      - uses: actions/checkout@v2
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Set up Node js ${{ matrix.node-version }}
-        uses: actions/setup-node@v2
-        with:
-          node-version: ${{ matrix.node-version }}
-      - name: Install package
-        run: pip install -r requirements.txt
-      - name: Download and extract app.asar
-        run: python main.py
-      - name: patch files
-        run: python patch.py
-      - name: Install pacman dependencies
+          node-version: '22'
+          cache: npm
+      - name: Install packaging dependencies
         run: |
-          sudo apt-get install libarchive-tools
-      - name: Install dev dependencies and build
-        run: |
-          cd out
-          npm install --only=dev
-          npm run build
-      - uses: marvinpinto/action-automatic-releases@v1.2.1
+          sudo apt-get update
+          sudo apt-get install -y 7zip libarchive-tools rpm
+          npm ci
+      - name: Validate release version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: npm run release:check -- "$RELEASE_TAG"
+      - name: Test migration, Linux compatibility and releases
+        run: npm test
+      - name: Build the latest Notion Calendar as Norc
+        env:
+          NORC_RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: npm run build -- --arch x64
+      - uses: actions/upload-artifact@v4
         with:
-          repo_token: "${{secrets.GITHUB_TOKEN }}"
-          automatic_release_tag: "latest"
-          prerelease: false
-          title: "Cron Build"
-          files: |
-            ./out/release/*.deb
-            ./out/release/*.pacman
+          name: norc-linux-x64
+          if-no-files-found: error
+          path: |
+            out/release/norc_*.deb
+            out/release/norc-*.pkg.tar.xz
+            out/release/norc-*.rpm
+            out/release/build-info.json
+            out/release/SHA256SUMS
 
-
-
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: norc-releases
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: norc-linux-x64
+          path: release
+      - name: Publish versioned release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/release.mjs publish "$RELEASE_TAG" --directory release --resume-draft

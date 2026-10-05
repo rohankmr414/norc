@@ -1,0 +1,24 @@
+{
+  "name": "norc",
+  "version": "1.139.0",
+  "private": true,
+  "description": "Build tools for unofficial Notion Calendar Linux packages",
+  "engines": { "node": ">=22.12.0" },
+  "scripts": {
+    "test": "node --test tests/*.test.js tests/*.test.mjs",
+    "extract": "node scripts/extract.mjs",
+    "patch": "node scripts/patch.mjs",
+    "build": "node scripts/build.mjs",
+    "build:rpm": "node scripts/build.mjs rpm",
+    "release:check": "node scripts/release.mjs check",
+    "upstream:check": "node scripts/upstream.mjs",
+    "icons:sync": "node scripts/icons.mjs"
+  },
+  "devDependencies": {
+    "@electron/asar": "4.3.1",
+    "compare-versions": "6.1.0",
+    "electron-builder": "26.15.3",
+    "plist": "3.1.0",
+    "semver": "7.7.4"
+  }
+}

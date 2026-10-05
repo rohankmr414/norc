@@ -1,5 +1,6 @@
-python3 main.py
-python3 patch.py
-cd out
-npm install --only=dev
-npm run build
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+
+npm ci
+exec node scripts/build.mjs "$@"

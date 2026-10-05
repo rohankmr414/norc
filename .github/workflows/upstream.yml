@@ -1,0 +1,130 @@
+name: Check Notion Calendar updates
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      available: ${{ steps.upstream.outputs.available }}
+      version: ${{ steps.upstream.outputs.version }}
+      tag: ${{ steps.upstream.outputs.tag }}
+      download-url: ${{ steps.upstream.outputs.download-url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Check the official upstream version
+        id: upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: npm run upstream:check
+
+  build-release:
+    if: needs.check.outputs.available == 'true'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: norc-releases
+      cancel-in-progress: false
+    env:
+      UPSTREAM_VERSION: ${{ needs.check.outputs.version }}
+      UPSTREAM_TAG: ${{ needs.check.outputs.tag }}
+      UPSTREAM_URL: ${{ needs.check.outputs.download-url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Recheck after acquiring the release lock
+        id: recheck
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: npm run upstream:check -- --url "$UPSTREAM_URL"
+      - name: Reuse an existing release tag when retrying
+        if: steps.recheck.outputs.available == 'true' && steps.recheck.outputs.tag-exists == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.tag }}
+          fetch-depth: 0
+      - name: Install tagged build dependencies
+        if: steps.recheck.outputs.available == 'true' && steps.recheck.outputs.tag-exists == 'true'
+        run: npm ci
+      - name: Install packaging dependencies
+        if: steps.recheck.outputs.available == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y 7zip libarchive-tools rpm
+      - name: Extract the detected upstream bundle
+        if: steps.recheck.outputs.available == 'true'
+        run: npm run extract -- --url "$UPSTREAM_URL"
+      - name: Prepare the version and icon assets for a new tag
+        if: steps.recheck.outputs.available == 'true' && steps.recheck.outputs.tag-exists != 'true'
+        run: |
+          npm version "$UPSTREAM_VERSION" --no-git-tag-version --allow-same-version
+          npm run icons:sync
+      - name: Validate the version and run tests
+        if: steps.recheck.outputs.available == 'true'
+        run: |
+          npm run release:check -- "$UPSTREAM_TAG"
+          npm test
+      - name: Record the release source
+        if: steps.recheck.outputs.available == 'true'
+        env:
+          TAG_EXISTS: ${{ steps.recheck.outputs.tag-exists }}
+        run: |
+          if [ "$TAG_EXISTS" != 'true' ]; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add package.json package-lock.json icons
+            if ! git diff --cached --quiet; then
+              git commit -m "chore: mirror Notion Calendar $UPSTREAM_VERSION"
+            fi
+          fi
+          SOURCE_COMMIT=$(git rev-parse HEAD)
+          echo "NORC_SOURCE_COMMIT=$SOURCE_COMMIT" >> "$GITHUB_ENV"
+      - name: Build RPM, DEB and Pacman packages
+        if: steps.recheck.outputs.available == 'true'
+        run: npm run build -- --reuse --arch x64 --release-tag "$UPSTREAM_TAG"
+      - uses: actions/upload-artifact@v4
+        if: steps.recheck.outputs.available == 'true'
+        with:
+          name: norc-upstream-${{ needs.check.outputs.version }}-x64
+          if-no-files-found: error
+          path: |
+            out/release/norc_*.deb
+            out/release/norc-*.pkg.tar.xz
+            out/release/norc-*.rpm
+            out/release/build-info.json
+            out/release/SHA256SUMS
+      - name: Push the verified source tag
+        if: steps.recheck.outputs.available == 'true' && steps.recheck.outputs.tag-exists != 'true'
+        run: |
+          git tag -a "$UPSTREAM_TAG" -m "Norc $UPSTREAM_TAG"
+          git push origin "refs/tags/$UPSTREAM_TAG"
+      - name: Publish the release or resume an interrupted draft
+        if: steps.recheck.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: node scripts/release.mjs publish "$UPSTREAM_TAG" --directory out/release --resume-draft

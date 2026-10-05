@@ -1,4 +1,6 @@
 # Logs
+/.idea/
+
 logs
 *.log
 npm-debug.log*
@@ -103,5 +105,10 @@ dist
 # TernJS port file
 .tern-port
 
-#dev scripts
-start.sh
+# Generated upstream source and Linux packages
+/out/
+/out-*/
+/norc-*/
+/app.asar
+*.dmg
+__pycache__/
