@@ -6,7 +6,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 const source = fs.readFileSync(path.join(__dirname, "../linux.js"), "utf8");
 
-function setup({ lock = true, argv = [], minimumVersion = "1.137.0" } = {}) {
+function setup({ lock = true, argv = [], minimumVersion = "1.137.0", settingsError } = {}) {
   const app = new EventEmitter();
   app.userAgentFallback = "Mozilla/5.0 (X11; Linux x86_64) Chrome/146.0 Norc/1.139.0 Electron/41.5.0";
   app.requestSingleInstanceLock = () => lock;
@@ -22,12 +22,21 @@ function setup({ lock = true, argv = [], minimumVersion = "1.137.0" } = {}) {
   const net = { fetch: async () => ({ ok: true, json: async () => ({ minimumElectronVersion: { version: minimumVersion } }) }) };
   const windows = [];
   const autoUpdater = {};
+  const settingsCalls = [];
+  const settingsMessages = [];
+  const electronUtil = {};
+  const dialog = { showMessageBox: async options => { settingsMessages.push(options); } };
   let loaded = false;
   const context = {
     process: { platform: "linux", argv, env: {} }, console, AbortSignal, URL,
     require(name) {
-      if (name === "electron") return { app, ipcMain, net, BrowserWindow: { getAllWindows: () => windows } };
+      if (name === "electron") return { app, dialog, ipcMain, net, BrowserWindow: { getAllWindows: () => windows } };
       if (name === "electron-updater") return { autoUpdater };
+      if (name === "electron-util") return electronUtil;
+      if (name === "./system-settings.js") return { openSystemSettings: async pane => {
+        settingsCalls.push(pane);
+        if (settingsError) throw settingsError;
+      } };
       if (name === "node:path") return path;
       if (name === "compare-versions") return require("compare-versions");
       if (name === "./upstream.json") return { version: "1.139.0", electronVersion: "41.5.0" };
@@ -50,8 +59,22 @@ function setup({ lock = true, argv = [], minimumVersion = "1.137.0" } = {}) {
     app.emit("browser-window-created", {}, window);
     return window;
   }
-  return { app, ipcMain, autoUpdater, loaded, createWindow, context, handlers };
+  return { app, ipcMain, autoUpdater, electronUtil, settingsCalls, settingsMessages, loaded, createWindow, context, handlers };
 }
+
+test("the upstream System Settings helper opens the Linux notification settings", async () => {
+  const state = setup();
+  await state.electronUtil.openSystemPreferences("notifications");
+  assert.deepEqual(state.settingsCalls, ["notifications"]);
+  assert.equal(state.settingsMessages.length, 0);
+});
+
+test("unavailable system settings show guidance instead of failing silently", async () => {
+  const state = setup({ settingsError: new Error("No settings app") });
+  await state.electronUtil.openSystemPreferences("notifications");
+  assert.equal(state.settingsMessages.length, 1);
+  assert.match(state.settingsMessages[0].detail, /Settings application and select Notifications/);
+});
 
 test("authentication callbacks are delivered without a calendar readiness event", () => {
   const state = setup({ argv: ["cron://www.notion.so/auth?code=test"] });

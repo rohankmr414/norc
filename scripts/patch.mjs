@@ -71,6 +71,7 @@ export async function patchApp({ output, arch = "x64" }) {
   await writeFile(preload, preloadSource);
   await writeJson(path.join(output, "build/main/upstream.json"), upstream);
   await copyFile(path.join(ROOT, "linux.js"), path.join(output, "build/main/linux.js"));
+  await copyFile(path.join(ROOT, "system-settings.js"), path.join(output, "build/main/system-settings.js"));
   await writeJson(manifest, data);
   console.info(`Configured Norc ${version} with Notion Calendar ${upstream.version} for ${arch}`);
 }

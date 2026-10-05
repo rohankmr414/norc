@@ -1,5 +1,5 @@
 // Linux entry point for the upstream Notion Calendar desktop application.
-const { app, BrowserWindow, ipcMain, net } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, net } = require("electron");
 const path = require("node:path");
 
 if (process.platform !== "linux") {
@@ -33,6 +33,21 @@ if (process.platform !== "linux") {
   autoUpdater.checkForUpdates = async () => null;
   autoUpdater.downloadUpdate = async () => [];
   autoUpdater.quitAndInstall = () => {};
+
+  // The upstream System Settings button calls this macOS/Windows-only helper.
+  // Keep its IPC path and supply a desktop-aware Linux implementation.
+  const { openSystemSettings } = require("./system-settings.js");
+  require("electron-util").openSystemPreferences = async (pane) => {
+    try {
+      await openSystemSettings(pane);
+    } catch (error) {
+      console.warn("Unable to open system settings:", error.message);
+      await dialog.showMessageBox({
+        type: "error", title: "System settings", message: "Could not open system settings",
+        detail: "Open your desktop's Settings application and select Notifications to manage Norc's notifications.",
+      });
+    }
+  };
 
   let mainWindow;
   let rendererReady = false;
