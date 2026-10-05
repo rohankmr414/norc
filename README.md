@@ -28,6 +28,11 @@ xdg-mime default norc.desktop x-scheme-handler/cron
 Quit any unpacked instance and launch the installed app before retrying.
 Updates are delivered through new Linux packages.
 
+Norc defaults to X11 (XWayland on Wayland desktops) so floating meeting reminders
+can follow your selected screen corner. To use native Wayland, fully quit Norc
+and run `norc --ozone-platform=wayland`; reminder placement is then
+[controlled by your desktop](https://www.electronjs.org/docs/latest/api/browser-window#platform-notices).
+
 ## Build and test
 
 Requires Linux, Node.js 22.12+, npm, and 7-Zip with DMG/HFS support (`7zz` or `7z`).

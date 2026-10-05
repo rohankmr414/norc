@@ -24,7 +24,8 @@ export async function buildApp(options) {
   await patchApp(options);
   await run("npm", ["install", "--include=dev", "--no-audit", "--no-fund"], { cwd: options.output });
   const builder = path.join(ROOT, "node_modules/.bin/electron-builder");
-  const args = ["--projectDir", options.output, "--linux", ...options.targets, `--${options.arch}`, "--publish", "never"];
+  const args = ["--projectDir", options.output, `--config.afterPack=${path.join(ROOT, "scripts/launcher.mjs")}`,
+    "--linux", ...options.targets, `--${options.arch}`, "--publish", "never"];
   if (options["electron-dist"]) args.push(`--config.electronDist=${path.resolve(options["electron-dist"])}`);
   await run(builder, args);
   await writeReleaseMetadata({ ...options, version });

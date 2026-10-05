@@ -36,7 +36,7 @@ export async function patchApp({ output, arch = "x64" }) {
     author: { name: "Norc contributors", email: "rohankmr414@users.noreply.github.com" },
     license: "UNLICENSED", main: "./build/main/linux.js",
     devDependencies: { electron: upstream.electronVersion },
-    scripts: { start: "electron ." },
+    scripts: { start: "electron --ozone-platform=x11 ." },
     build: {
       appId: "com.cron.electron", electronVersion: upstream.electronVersion, productName: "Norc", buildNumber: "1",
       linux: {
