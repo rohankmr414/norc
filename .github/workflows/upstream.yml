@@ -2,7 +2,7 @@ name: Check Notion Calendar updates
 
 on:
   schedule:
-    - cron: '23 */6 * * *'
+    - cron: "23 */6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
       - run: npm ci
       - name: Check the official upstream version
@@ -52,7 +52,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
       - run: npm ci
       - name: Recheck after acquiring the release lock
@@ -87,6 +87,7 @@ jobs:
         if: steps.recheck.outputs.available == 'true'
         run: |
           npm run release:check -- "$UPSTREAM_TAG"
+          npm run --if-present format:check
           npm test
       - name: Record the release source
         if: steps.recheck.outputs.available == 'true'

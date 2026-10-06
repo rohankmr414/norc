@@ -9,7 +9,10 @@ function calendarFileArguments(argv, workingDirectory) {
   const files = new Set();
   let positional = false;
   for (const argument of argv) {
-    if (argument === "--") { positional = true; continue; }
+    if (argument === "--") {
+      positional = true;
+      continue;
+    }
     if (typeof argument !== "string" || !argument || argument.includes("\0")) continue;
     if (!positional && argument.startsWith("-")) continue;
     let filename = argument;
@@ -19,7 +22,9 @@ function calendarFileArguments(argv, workingDirectory) {
         if (url.search || url.hash) continue;
         // fileURLToPath rejects remote hosts and encoded path separators.
         filename = fileURLToPath(url);
-      } catch { continue; }
+      } catch {
+        continue;
+      }
     } else if (/^[a-z][a-z0-9+.-]*:/i.test(argument)) {
       continue;
     }

@@ -1,10 +1,20 @@
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
-const { findDesktopEntry, readDesktopEntry, execProgram, executableExists } = require("./desktop-entry.js");
+const {
+  findDesktopEntry,
+  readDesktopEntry,
+  execProgram,
+  executableExists,
+} = require("./desktop-entry.js");
 const execFileAsync = promisify(execFile);
 
 async function readCommand(command, args, env) {
-  const { stdout } = await execFileAsync(command, args, { env, encoding: "utf8", timeout: 2000, maxBuffer: 16384 });
+  const { stdout } = await execFileAsync(command, args, {
+    env,
+    encoding: "utf8",
+    timeout: 2000,
+    maxBuffer: 16384,
+  });
   return stdout.trim();
 }
 

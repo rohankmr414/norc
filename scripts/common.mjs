@@ -16,8 +16,13 @@ export const ARCHITECTURES = {
 };
 
 export async function exists(filename) {
-  try { await access(filename); return true; }
-  catch (error) { if (error.code === "ENOENT") return false; throw error; }
+  try {
+    await access(filename);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
 }
 export async function readJson(filename) {
   return JSON.parse(await readFile(filename, "utf8"));
@@ -32,12 +37,15 @@ export async function hashFile(filename) {
 }
 export function validateVersion(version) {
   if (semver.valid(version) !== version || semver.parse(version)?.build.length) {
-    throw new Error(`Expected a SemVer version without build metadata, got ${JSON.stringify(version)}`);
+    throw new Error(
+      `Expected a SemVer version without build metadata, got ${JSON.stringify(version)}`,
+    );
   }
   return version;
 }
 export function validateArchitecture(arch) {
-  if (!Object.hasOwn(ARCHITECTURES, arch)) throw new Error(`Unsupported architecture: ${arch}; use x64 or arm64`);
+  if (!Object.hasOwn(ARCHITECTURES, arch))
+    throw new Error(`Unsupported architecture: ${arch}; use x64 or arm64`);
   return arch;
 }
 export function artifactNames(version, arch) {
@@ -64,14 +72,18 @@ export async function run(command, args, options = {}) {
 }
 export function parseOptions(args = process.argv.slice(2)) {
   const { values, positionals } = parseArgs({
-    args, allowPositionals: true,
+    args,
+    allowPositionals: true,
     options: {
-      dmg: { type: "string" }, url: { type: "string", default: DOWNLOAD_URL },
+      dmg: { type: "string" },
+      url: { type: "string", default: DOWNLOAD_URL },
       output: { type: "string", default: path.join(ROOT, "out") },
       arch: { type: "string", default: "x64" },
-      x64: { type: "boolean" }, arm64: { type: "boolean" },
+      x64: { type: "boolean" },
+      arm64: { type: "boolean" },
       reuse: { type: "boolean", default: false },
-      "electron-dist": { type: "string" }, help: { type: "boolean" },
+      "electron-dist": { type: "string" },
+      help: { type: "boolean" },
       "release-tag": { type: "string" },
     },
   });
@@ -83,6 +95,9 @@ export function parseOptions(args = process.argv.slice(2)) {
 }
 export function cli(moduleUrl, operation) {
   if (process.argv[1] && moduleUrl === pathToFileURL(path.resolve(process.argv[1])).href) {
-    operation().catch((error) => { console.error(error.message); process.exitCode = 1; });
+    operation().catch((error) => {
+      console.error(error.message);
+      process.exitCode = 1;
+    });
   }
 }

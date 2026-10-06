@@ -34,6 +34,10 @@ test("meeting, authentication, mobile download and unrelated links keep their or
     "mailto:person@example.com",
     "file:///product/calendar/download/desktop",
     "/product/calendar/download/desktop",
-    "invalid URL", "", undefined, null,
-  ]) assert.equal(linuxUpdateUrl(url), url);
+    "invalid URL",
+    "",
+    undefined,
+    null,
+  ])
+    assert.equal(linuxUpdateUrl(url), url);
 });

@@ -4,9 +4,17 @@ const { open } = require("node:fs/promises");
 const path = require("node:path");
 
 function escapeHtml(text) {
-  return text.replace(/[&<>"']/g, character => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  })[character]);
+  return text.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[character],
+  );
 }
 
 function previewDocument(name, content) {
@@ -29,26 +37,42 @@ function previewDocument(name, content) {
 async function showPreview(parent, name, content) {
   if (!parent || parent.isDestroyed()) return;
   const window = new BrowserWindow({
-    parent, title: `${name} — Norc`, width: 900, height: 650,
-    minWidth: 400, minHeight: 300, show: false, autoHideMenuBar: true,
+    parent,
+    title: `${name} — Norc`,
+    width: 900,
+    height: 650,
+    minWidth: 400,
+    minHeight: 300,
+    show: false,
+    autoHideMenuBar: true,
     webPreferences: {
-      nodeIntegration: false, contextIsolation: true, sandbox: true, javascript: false,
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      javascript: false,
       partition: "norc-file-preview",
     },
   });
-  const close = () => { if (!window.isDestroyed()) window.destroy(); };
+  const close = () => {
+    if (!window.isDestroyed()) window.destroy();
+  };
   parent.once("closed", close);
   window.once("closed", () => parent.removeListener("closed", close));
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  window.webContents.on("will-navigate", event => event.preventDefault());
+  window.webContents.on("will-navigate", (event) => event.preventDefault());
   window.webContents.on("before-input-event", (event, input) => {
-    if (input.type === "keyDown" && (input.key === "Escape" || (input.control && input.key.toLowerCase() === "w"))) {
+    if (
+      input.type === "keyDown" &&
+      (input.key === "Escape" || (input.control && input.key.toLowerCase() === "w"))
+    ) {
       event.preventDefault();
       window.close();
     }
   });
   try {
-    await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(previewDocument(name, content))}`);
+    await window.loadURL(
+      `data:text/html;charset=utf-8,${encodeURIComponent(previewDocument(name, content))}`,
+    );
     if (!window.isDestroyed()) window.show();
   } catch (error) {
     close();
@@ -59,34 +83,51 @@ async function showPreview(parent, name, content) {
 async function reportError(parent, error) {
   console.warn("Unable to preview attachment:", error.message);
   if (!parent || parent.isDestroyed()) return;
-  await dialog.showMessageBox(parent, {
-    type: "error", title: "Attachment preview", message: "Could not preview attachment",
-    detail: "Try opening the attachment again. For a file on disk, check that it is readable.",
-  }).catch(dialogError => console.warn("Unable to show preview error:", dialogError.message));
+  await dialog
+    .showMessageBox(parent, {
+      type: "error",
+      title: "Attachment preview",
+      message: "Could not preview attachment",
+      detail: "Try opening the attachment again. For a file on disk, check that it is readable.",
+    })
+    .catch((dialogError) => console.warn("Unable to show preview error:", dialogError.message));
 }
 
 async function previewFromString(parent, attachment) {
   if (!parent || parent.isDestroyed()) return;
   try {
     if (typeof attachment?.content !== "string") throw new Error("Attachment content must be text");
-    const name = typeof attachment.name === "string" && attachment.name ? attachment.name : "Feedback attachment";
+    const name =
+      typeof attachment.name === "string" && attachment.name
+        ? attachment.name
+        : "Feedback attachment";
     await showPreview(parent, name, attachment.content);
-  } catch (error) { await reportError(parent, error); }
+  } catch (error) {
+    await reportError(parent, error);
+  }
 }
 
 async function previewFromPath(parent, attachment) {
   if (!parent || parent.isDestroyed()) return;
   try {
-    if (typeof attachment?.path !== "string" || !path.isAbsolute(attachment.path)) throw new Error("An absolute file path is required");
+    if (typeof attachment?.path !== "string" || !path.isAbsolute(attachment.path))
+      throw new Error("An absolute file path is required");
     const file = await open(attachment.path, constants.O_RDONLY | constants.O_NONBLOCK);
     let content;
     try {
       if (!(await file.stat()).isFile()) throw new Error("Not a regular file");
       content = await file.readFile("utf8");
-    } finally { await file.close(); }
-    const name = typeof attachment.name === "string" && attachment.name ? attachment.name : path.basename(attachment.path);
+    } finally {
+      await file.close();
+    }
+    const name =
+      typeof attachment.name === "string" && attachment.name
+        ? attachment.name
+        : path.basename(attachment.path);
     await showPreview(parent, name, content);
-  } catch (error) { await reportError(parent, error); }
+  } catch (error) {
+    await reportError(parent, error);
+  }
 }
 
 module.exports = { previewFromString, previewFromPath };

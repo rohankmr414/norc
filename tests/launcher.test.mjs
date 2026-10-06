@@ -16,9 +16,11 @@ async function runnableLauncher(t) {
   const directory = await fixture(t);
   const launcher = path.join(directory, "norc");
   await writeFile(launcher, LAUNCHER, { mode: 0o755 });
-  await writeFile(path.join(directory, "norc-bin"),
+  await writeFile(
+    path.join(directory, "norc-bin"),
     "#!/bin/sh\nexec node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' -- \"$@\"\n",
-    { mode: 0o755 });
+    { mode: 0o755 },
+  );
   return { directory, launcher };
 }
 
@@ -44,14 +46,18 @@ test("unexpected packaging input fails without replacing either executable", asy
 test("normal launch supplies X11 before Electron starts and preserves callback arguments", async (t) => {
   const { launcher } = await runnableLauncher(t);
   const args = ["--enable-logging", "cron://callback?code=a b&state=$value"];
-  assert.deepEqual(JSON.parse(execFileSync(launcher, args, { encoding: "utf8" })),
-    ["--ozone-platform=x11", ...args]);
+  assert.deepEqual(JSON.parse(execFileSync(launcher, args, { encoding: "utf8" })), [
+    "--ozone-platform=x11",
+    ...args,
+  ]);
 });
 
 test("explicit backend selections take precedence over the X11 default", async (t) => {
   const { launcher } = await runnableLauncher(t);
   for (const args of [
-    ["--ozone-platform=wayland"], ["--ozone-platform=x11"], ["--ozone-platform=auto"],
+    ["--ozone-platform=wayland"],
+    ["--ozone-platform=x11"],
+    ["--ozone-platform=auto"],
     ["--enable-logging", "--ozone-platform=wayland", "cron://callback"],
     ["--ozone-platform", "wayland"],
   ]) {
@@ -64,19 +70,26 @@ test("an installed command symlink resolves the binary beside the real launcher"
   const linkDirectory = await fixture(t);
   const link = path.join(linkDirectory, "norc");
   await symlink(launcher, link);
-  assert.deepEqual(JSON.parse(execFileSync(link, ["cron://callback"], { encoding: "utf8" })),
-    ["--ozone-platform=x11", "cron://callback"]);
+  assert.deepEqual(JSON.parse(execFileSync(link, ["cron://callback"], { encoding: "utf8" })), [
+    "--ozone-platform=x11",
+    "cron://callback",
+  ]);
 });
 
 test("arguments after the option separator do not disable the default backend", async (t) => {
   const { launcher } = await runnableLauncher(t);
   const args = ["--", "--ozone-platform=wayland"];
-  assert.deepEqual(JSON.parse(execFileSync(launcher, args, { encoding: "utf8" })),
-    ["--ozone-platform=x11", ...args]);
+  assert.deepEqual(JSON.parse(execFileSync(launcher, args, { encoding: "utf8" })), [
+    "--ozone-platform=x11",
+    ...args,
+  ]);
 });
 
 test("the launcher returns the Electron process exit status", async (t) => {
   const { directory, launcher } = await runnableLauncher(t);
   await writeFile(path.join(directory, "norc-bin"), "#!/bin/sh\nexit 23\n", { mode: 0o755 });
-  assert.throws(() => execFileSync(launcher), (error) => error.status === 23);
+  assert.throws(
+    () => execFileSync(launcher),
+    (error) => error.status === 23,
+  );
 });

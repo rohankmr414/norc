@@ -2,13 +2,13 @@ name: Norc Linux
 
 on:
   push:
-    branches: ['**']
-    tags: ['v*']
+    branches: ["**"]
+    tags: ["v*"]
     paths-ignore:
-      - '**/*.md'
+      - "**/*.md"
   pull_request:
     paths-ignore:
-      - '**/*.md'
+      - "**/*.md"
   workflow_dispatch:
 
 permissions:
@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
       - name: Install packaging dependencies
         run: |
@@ -34,7 +34,9 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: npm run release:check -- "$RELEASE_TAG"
       - name: Test migration, Linux compatibility and releases
-        run: npm test
+        run: |
+          npm run format:check
+          npm test
       - name: Build the latest Notion Calendar as Norc
         env:
           NORC_RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
@@ -63,7 +65,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
       - run: npm ci
       - uses: actions/download-artifact@v4

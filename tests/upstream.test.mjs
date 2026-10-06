@@ -4,19 +4,35 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { githubGet } from "../scripts/github.mjs";
-import { checkUpstream, discoverUpstream, planUpdate, upstreamFromUrl, writeCheckOutputs } from "../scripts/upstream.mjs";
+import {
+  checkUpstream,
+  discoverUpstream,
+  planUpdate,
+  upstreamFromUrl,
+  writeCheckOutputs,
+} from "../scripts/upstream.mjs";
 
-const downloadUrl = "https://calendar-desktop-release.notion-static.com/Notion%20Calendar-1.139.0-universal.dmg";
+const downloadUrl =
+  "https://calendar-desktop-release.notion-static.com/Notion%20Calendar-1.139.0-universal.dmg";
 const upstream = upstreamFromUrl(downloadUrl);
 test("the lightweight version check resolves the official redirect and pins the download", async () => {
-  const result = await discoverUpstream({ fetchImpl: async (url, options) => {
-    assert.match(url, /www\.notion\.com/);
-    assert.equal(options.method, "HEAD");
-    return { ok: true, url: downloadUrl };
-  } });
+  const result = await discoverUpstream({
+    fetchImpl: async (url, options) => {
+      assert.match(url, /www\.notion\.com/);
+      assert.equal(options.method, "HEAD");
+      return { ok: true, url: downloadUrl };
+    },
+  });
   assert.deepEqual(result, { version: "1.139.0", tag: "v1.139.0", downloadUrl });
-  await assert.rejects(discoverUpstream({ fetchImpl: async () => ({ ok: false, status: 503 }) }), /HTTP 503/);
-  for (const invalid of [downloadUrl.replace("https:", "http:"), downloadUrl.replace("1.139.0", "latest"), "https://example.com/download"]) {
+  await assert.rejects(
+    discoverUpstream({ fetchImpl: async () => ({ ok: false, status: 503 }) }),
+    /HTTP 503/,
+  );
+  for (const invalid of [
+    downloadUrl.replace("https:", "http:"),
+    downloadUrl.replace("1.139.0", "latest"),
+    "https://example.com/download",
+  ]) {
     assert.throws(() => upstreamFromUrl(invalid));
   }
 });
@@ -35,7 +51,10 @@ test("GitHub errors stop the check; only an explicitly allowed 404 means absence
   const options = { repo: "owner/norc", fetchImpl: async () => ({ ok: false, status: 404 }) };
   assert.equal(await githubGet("releases/tags/v1.139.0", { ...options, allowMissing: true }), null);
   await assert.rejects(githubGet("releases", options), /HTTP 404/);
-  await assert.rejects(githubGet("releases", { ...options, fetchImpl: async () => ({ ok: false, status: 403 }) }), /HTTP 403/);
+  await assert.rejects(
+    githubGet("releases", { ...options, fetchImpl: async () => ({ ok: false, status: 403 }) }),
+    /HTTP 403/,
+  );
 });
 test("an interrupted release with an existing tag is retried using that tag", async () => {
   const calls = [];
@@ -44,7 +63,8 @@ test("an interrupted release with an existing tag is retried using that tag", as
     if (!url.startsWith("https://api.github.com")) return { ok: true, url: downloadUrl };
     if (url.endsWith("releases?per_page=100")) return { ok: true, json: async () => [] };
     if (url.includes("releases/tags/")) return { ok: false, status: 404 };
-    if (url.includes("git/ref/tags/")) return { ok: true, json: async () => ({ object: { sha: "a".repeat(40) } }) };
+    if (url.includes("git/ref/tags/"))
+      return { ok: true, json: async () => ({ object: { sha: "a".repeat(40) } }) };
     throw new Error(`Unexpected request: ${url}`);
   };
   const result = await checkUpstream({ repo: "owner/norc", fetchImpl });
@@ -58,6 +78,12 @@ test("workflow outputs contain the pinned version and URL without multiline inje
   const filename = path.join(directory, "output");
   const plan = planUpdate(upstream, []);
   await writeCheckOutputs(plan, filename);
-  assert.match(await readFile(filename, "utf8"), /available=true\nversion=1\.139\.0\ntag=v1\.139\.0\n/);
-  await assert.rejects(writeCheckOutputs({ ...plan, downloadUrl: "https://example.com\navailable=false" }, filename), /multiline/);
+  assert.match(
+    await readFile(filename, "utf8"),
+    /available=true\nversion=1\.139\.0\ntag=v1\.139\.0\n/,
+  );
+  await assert.rejects(
+    writeCheckOutputs({ ...plan, downloadUrl: "https://example.com\navailable=false" }, filename),
+    /multiline/,
+  );
 });

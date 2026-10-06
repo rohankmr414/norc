@@ -21,8 +21,11 @@ export async function installLauncher(appOutDir) {
   const executable = path.join(appOutDir, "norc");
   const handle = await open(executable, "r");
   const magic = Buffer.alloc(4);
-  try { await handle.read(magic, 0, magic.length, 0); }
-  finally { await handle.close(); }
+  try {
+    await handle.read(magic, 0, magic.length, 0);
+  } finally {
+    await handle.close();
+  }
   if (!magic.equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) {
     throw new Error("Expected the Norc ELF executable before installing its launcher");
   }

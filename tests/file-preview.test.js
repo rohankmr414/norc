@@ -13,8 +13,14 @@ function setup({ load = async () => {}, createError, dialogError } = {}) {
   const parent = new EventEmitter();
   parent.destroyed = false;
   parent.isDestroyed = () => parent.destroyed;
-  parent.destroy = () => { parent.destroyed = true; parent.emit("closed"); };
-  const windows = [], messages = [], warnings = [], fileOpens = [];
+  parent.destroy = () => {
+    parent.destroyed = true;
+    parent.emit("closed");
+  };
+  const windows = [],
+    messages = [],
+    warnings = [],
+    fileOpens = [];
   class BrowserWindow extends EventEmitter {
     constructor(options) {
       super();
@@ -22,29 +28,56 @@ function setup({ load = async () => {}, createError, dialogError } = {}) {
       this.options = options;
       this.destroyed = false;
       this.webContents = new EventEmitter();
-      this.webContents.setWindowOpenHandler = handler => { this.openWindow = handler; };
+      this.webContents.setWindowOpenHandler = (handler) => {
+        this.openWindow = handler;
+      };
       windows.push(this);
     }
-    isDestroyed() { return this.destroyed; }
-    destroy() { if (!this.destroyed) { this.destroyed = true; this.emit("closed"); } }
-    close() { this.destroy(); }
-    show() { this.shown = true; }
-    async loadURL(url) { this.url = url; await load(); }
-    get html() { return decodeURIComponent(this.url.split(",").slice(1).join(",")); }
+    isDestroyed() {
+      return this.destroyed;
+    }
+    destroy() {
+      if (!this.destroyed) {
+        this.destroyed = true;
+        this.emit("closed");
+      }
+    }
+    close() {
+      this.destroy();
+    }
+    show() {
+      this.shown = true;
+    }
+    async loadURL(url) {
+      this.url = url;
+      await load();
+    }
+    get html() {
+      return decodeURIComponent(this.url.split(",").slice(1).join(","));
+    }
   }
   const context = {
     module: { exports: {} },
     console: { warn: (...args) => warnings.push(args) },
     require(name) {
-      if (name === "electron") return { BrowserWindow, dialog: { showMessageBox: async (owner, message) => {
-        assert.equal(owner, parent);
-        messages.push(message);
-        if (dialogError) throw dialogError;
-      } } };
-      if (name === "node:fs/promises") return { open: async (...args) => {
-        fileOpens.push(args[0]);
-        return fs.open(...args);
-      } };
+      if (name === "electron")
+        return {
+          BrowserWindow,
+          dialog: {
+            showMessageBox: async (owner, message) => {
+              assert.equal(owner, parent);
+              messages.push(message);
+              if (dialogError) throw dialogError;
+            },
+          },
+        };
+      if (name === "node:fs/promises")
+        return {
+          open: async (...args) => {
+            fileOpens.push(args[0]);
+            return fs.open(...args);
+          },
+        };
       return require(name);
     },
   };
@@ -87,7 +120,7 @@ test("an empty attachment remains previewable and missing display names get a us
   assert.match(state.windows[0].html, /<pre><\/pre>/);
 });
 
-test("path previews read the original file and leave it unchanged when closed", async t => {
+test("path previews read the original file and leave it unchanged when closed", async (t) => {
   const directory = await fixture(t);
   const filename = path.join(directory, "debug #✓.json");
   const content = '{\r\n  "summary": "Lunch ☕"\r\n}\r\n';
@@ -104,20 +137,29 @@ test("path previews read the original file and leave it unchanged when closed", 
   assert.equal(state.parent.listenerCount("closed"), 0);
 });
 
-test("bad attachment payloads and missing or non-file paths show errors without creating a preview", async t => {
+test("bad attachment payloads and missing or non-file paths show errors without creating a preview", async (t) => {
   const directory = await fixture(t);
   const state = setup();
-  for (const attachment of [null, {}, { content: {} }]) await state.previewFromString(state.parent, attachment);
-  for (const attachment of [null, { path: "relative.json" }, { path: path.join(directory, "missing.json") }, { path: directory }]) {
+  for (const attachment of [null, {}, { content: {} }])
+    await state.previewFromString(state.parent, attachment);
+  for (const attachment of [
+    null,
+    { path: "relative.json" },
+    { path: path.join(directory, "missing.json") },
+    { path: directory },
+  ]) {
     await state.previewFromPath(state.parent, attachment);
   }
   assert.equal(state.messages.length, 7);
-  assert.ok(state.messages.every(message => message.message === "Could not preview attachment"));
+  assert.ok(state.messages.every((message) => message.message === "Could not preview attachment"));
   assert.deepEqual(state.windows, []);
 });
 
-test("unreadable path previews report a failure and preserve file permissions", async t => {
-  if (process.getuid?.() === 0) { t.skip("root can read mode-000 files"); return; }
+test("unreadable path previews report a failure and preserve file permissions", async (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip("root can read mode-000 files");
+    return;
+  }
   const directory = await fixture(t);
   const filename = path.join(directory, "private.json");
   await fs.writeFile(filename, "{}", { mode: 0o000 });
@@ -127,27 +169,43 @@ test("unreadable path previews report a failure and preserve file permissions", 
     assert.equal(state.messages.length, 1);
     assert.equal((await fs.stat(filename)).mode & 0o777, 0o000);
     assert.deepEqual(state.windows, []);
-  } finally { await fs.chmod(filename, 0o600); }
+  } finally {
+    await fs.chmod(filename, 0o600);
+  }
 });
 
 test("window creation and page-load failures show errors and release the failed window", async () => {
-  for (const options of [{ createError: new Error("Cannot create window") }, { load: async () => { throw new Error("Load failed"); } }]) {
+  for (const options of [
+    { createError: new Error("Cannot create window") },
+    {
+      load: async () => {
+        throw new Error("Load failed");
+      },
+    },
+  ]) {
     const state = setup(options);
     await state.previewFromString(state.parent, { name: "debug.json", content: "{}" });
     assert.equal(state.messages.length, 1);
-    assert.ok(state.windows.every(window => window.isDestroyed() && !window.shown));
+    assert.ok(state.windows.every((window) => window.isDestroyed() && !window.shown));
     assert.equal(state.parent.listenerCount("closed"), 0);
   }
 });
 
 test("preview windows block navigation and support Escape and Ctrl+W without closing the calendar", async () => {
-  for (const input of [{ type: "keyDown", key: "Escape" }, { type: "keyDown", key: "W", control: true }]) {
+  for (const input of [
+    { type: "keyDown", key: "Escape" },
+    { type: "keyDown", key: "W", control: true },
+  ]) {
     const state = setup();
     await state.previewFromString(state.parent, { name: "debug.json", content: "{}" });
     const [window] = state.windows;
     assert.equal(window.openWindow({ url: "https://example.com" }).action, "deny");
     let prevented = 0;
-    const event = { preventDefault() { prevented++; } };
+    const event = {
+      preventDefault() {
+        prevented++;
+      },
+    };
     window.webContents.emit("will-navigate", event, "https://example.com");
     window.webContents.emit("before-input-event", event, input);
     assert.equal(prevented, 2);
@@ -159,7 +217,12 @@ test("preview windows block navigation and support Escape and Ctrl+W without clo
 
 test("closing the calendar while a preview loads closes the child without showing an error", async () => {
   let finish;
-  const state = setup({ load: () => new Promise(resolve => { finish = resolve; }) });
+  const state = setup({
+    load: () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  });
   const loading = state.previewFromString(state.parent, { name: "debug.json", content: "{}" });
   state.parent.destroy();
   finish();

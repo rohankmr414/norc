@@ -15,10 +15,7 @@ if (process.platform !== "linux") {
   app.userAgentFallback = app.userAgentFallback
     .replace(`Norc/${upstream.version}`, `NotionCalendar/${upstream.version}`)
     .replace(`norc/${upstream.version}`, `NotionCalendar/${upstream.version}`)
-    .replace(
-      /\([^)]*Linux[^)]*\)/,
-      "(Windows NT 10.0; Win64; x64)",
-    );
+    .replace(/\([^)]*Linux[^)]*\)/, "(Windows NT 10.0; Win64; x64)");
   // XDG autostart works across Linux desktops. Use the packaged wrapper so
   // startup retains its XWayland default and command-line handling.
   const { createAutostart } = require("./autostart.js");
@@ -27,14 +24,20 @@ if (process.platform !== "linux") {
     : [process.execPath, "--ozone-platform=x11", app.getAppPath()];
   const autostart = createAutostart({ command });
   app.getLoginItemSettings = autostart.getLoginItemSettings;
-  app.setLoginItemSettings = options => {
+  app.setLoginItemSettings = (options) => {
     try {
       autostart.setLoginItemSettings(options);
     } catch (error) {
-      dialog.showMessageBox({
-        type: "error", title: "Start at login", message: "Could not update start at login",
-        detail: "Check that your user configuration directory is writable, then try again.",
-      }).catch(dialogError => console.warn("Unable to show autostart error:", dialogError.message));
+      dialog
+        .showMessageBox({
+          type: "error",
+          title: "Start at login",
+          message: "Could not update start at login",
+          detail: "Check that your user configuration directory is writable, then try again.",
+        })
+        .catch((dialogError) =>
+          console.warn("Unable to show autostart error:", dialogError.message),
+        );
       // Upstream must not record a successful settings change after a failure.
       throw error;
     }
@@ -63,8 +66,11 @@ if (process.platform !== "linux") {
     } catch (error) {
       console.warn("Unable to open system settings:", error.message);
       await dialog.showMessageBox({
-        type: "error", title: "System settings", message: "Could not open system settings",
-        detail: "Open your desktop's Settings application and select Notifications to manage Norc's notifications.",
+        type: "error",
+        title: "System settings",
+        message: "Could not open system settings",
+        detail:
+          "Open your desktop's Settings application and select Notifications to manage Norc's notifications.",
       });
     }
   };
@@ -96,8 +102,11 @@ if (process.platform !== "linux") {
         const filename = pendingFiles[0];
         const window = mainWindow;
         let payload, error;
-        try { payload = await readCalendarFile(filename); }
-        catch (readError) { error = readError; }
+        try {
+          payload = await readCalendarFile(filename);
+        } catch (readError) {
+          error = readError;
+        }
         // A reload or replacement window must install its importer first.
         if (!calendarReady || mainWindow !== window || window.isDestroyed()) return;
         pendingFiles.shift();
@@ -107,10 +116,16 @@ if (process.platform !== "linux") {
           window.webContents.send("cronNativeFileOpen", payload);
         } catch (openError) {
           console.warn("Unable to open calendar file:", openError.message);
-          dialog.showMessageBox({
-            type: "error", title: "Open calendar file", message: "Could not open calendar file",
-            detail: `Check that “${path.basename(filename)}” is a readable .ics or .vcs file, then try again.`,
-          }).catch(dialogError => console.warn("Unable to show file-opening error:", dialogError.message));
+          dialog
+            .showMessageBox({
+              type: "error",
+              title: "Open calendar file",
+              message: "Could not open calendar file",
+              detail: `Check that “${path.basename(filename)}” is a readable .ics or .vcs file, then try again.`,
+            })
+            .catch((dialogError) =>
+              console.warn("Unable to show file-opening error:", dialogError.message),
+            );
         }
       }
     } finally {
@@ -125,7 +140,13 @@ if (process.platform !== "linux") {
     const files = calendarFileArguments(argv, workingDirectory);
     pendingLinks.push(...links);
     pendingFiles.push(...files);
-    if (!links.length && !files.length && argv.includes("--from-login") && argv.includes("--norc-start-hidden")) return;
+    if (
+      !links.length &&
+      !files.length &&
+      argv.includes("--from-login") &&
+      argv.includes("--norc-start-hidden")
+    )
+      return;
     const window = mainWindow || BrowserWindow.getAllWindows()[0];
     focusWindow(window);
     deliverLinks();
@@ -148,7 +169,11 @@ if (process.platform !== "linux") {
     // DOM ready, but the sign-in page does not send the calendar's cronReady.
     window.webContents.on("dom-ready", () => {
       const hostname = new URL(window.webContents.getURL()).hostname;
-      if (["notion.so", "www.notion.so", "notion.com", "www.notion.com", "app.notion.com"].includes(hostname)) {
+      if (
+        ["notion.so", "www.notion.so", "notion.com", "www.notion.com", "app.notion.com"].includes(
+          hostname,
+        )
+      ) {
         rendererReady = true;
         deliverLinks();
       }
@@ -162,7 +187,9 @@ if (process.platform !== "linux") {
       void deliverFiles();
     }
   });
-  app.on("second-instance", (_event, argv, workingDirectory) => handleArguments(argv, workingDirectory || process.cwd()));
+  app.on("second-instance", (_event, argv, workingDirectory) =>
+    handleArguments(argv, workingDirectory || process.cwd()),
+  );
   handleArguments(process.argv, process.cwd());
   require("./main.js");
 
@@ -177,7 +204,9 @@ if (process.platform !== "linux") {
           });
           if (!response.ok) return false;
           const minimum = (await response.json()).minimumElectronVersion?.version;
-          return minimum ? require("compare-versions").compare(minimum, app.getVersion(), ">") : false;
+          return minimum
+            ? require("compare-versions").compare(minimum, app.getVersion(), ">")
+            : false;
         } catch {
           return false;
         }

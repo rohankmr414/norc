@@ -11,7 +11,8 @@ function setup(desktop, { server = "", uriHandler = "", missing = [] } = {}) {
     async launch(command, args, env) {
       calls.push([command, ...args]);
       launchEnvironments.push(env);
-      if (missing.includes(command) || missing.includes([command, ...args].join(" "))) throw new Error("Unavailable");
+      if (missing.includes(command) || missing.includes([command, ...args].join(" ")))
+        throw new Error("Unavailable");
     },
     async read(command, args) {
       reads.push([command, ...args]);
@@ -75,6 +76,9 @@ test("a registered settings URI supports other desktops", async () => {
 
 test("unknown desktops without a URI handler fail without opening an unrelated settings app", async () => {
   const state = setup("sway", { server: "('dunst', 'knopwob', '1.13', '1.2')" });
-  await assert.rejects(openSystemSettings("notifications", state.options), /No compatible system settings/);
+  await assert.rejects(
+    openSystemSettings("notifications", state.options),
+    /No compatible system settings/,
+  );
   assert.deepEqual(state.calls, []);
 });

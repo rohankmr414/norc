@@ -11,7 +11,13 @@ import { prepareRpmScripts } from "../scripts/rpm.mjs";
 async function fixture(t, { alternatives = true, alternativesFail = false } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "norc-rpm-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  for (const directory of ["tools", "usr/bin", "etc/alternatives", "etc/apparmor.d", "opt/Norc/resources"]) {
+  for (const directory of [
+    "tools",
+    "usr/bin",
+    "etc/alternatives",
+    "etc/apparmor.d",
+    "opt/Norc/resources",
+  ]) {
     await mkdir(path.join(root, directory), { recursive: true });
   }
   await writeFile(path.join(root, "opt/Norc/norc"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
@@ -29,8 +35,14 @@ if (command === "update-alternatives") {
   if (args[0] === "--install") { fs.symlinkSync(args[3], alternative); fs.symlinkSync(alternative, link); }
 }
 `;
-  for (const command of ["unshare", "apparmor_status", "apparmor_parser", "update-mime-database", "update-desktop-database",
-    ...(alternatives ? ["update-alternatives"] : [])]) {
+  for (const command of [
+    "unshare",
+    "apparmor_status",
+    "apparmor_parser",
+    "update-mime-database",
+    "update-desktop-database",
+    ...(alternatives ? ["update-alternatives"] : []),
+  ]) {
     await writeFile(path.join(root, "tools", command), mock, { mode: 0o755 });
   }
   for (const command of ["rm", "ln", "cp", "chmod", "readlink"]) {
@@ -39,7 +51,12 @@ if (command === "update-alternatives") {
   const scripts = await prepareRpmScripts(root);
   async function localScript(filename) {
     let source = await readFile(filename, "utf8");
-    for (const location of ["/usr/bin/norc", "/etc/alternatives/norc", "/etc/apparmor.d/norc", "/opt/Norc"]) {
+    for (const location of [
+      "/usr/bin/norc",
+      "/etc/alternatives/norc",
+      "/etc/apparmor.d/norc",
+      "/opt/Norc",
+    ]) {
       source = source.replaceAll(location, path.join(root, location));
     }
     const local = `${filename}.test`;
@@ -49,24 +66,43 @@ if (command === "update-alternatives") {
   }
   const postTransaction = await localScript(scripts.fpm[1]);
   const afterRemove = await localScript(scripts.afterRemove);
-  const env = { ...process.env, PATH: path.join(root, "tools"), NORC_RPM_TEST_ROOT: root,
-    NORC_RPM_TEST_ALTERNATIVES_FAIL: alternativesFail ? "1" : "0" };
-  const run = (filename, ...args) => execFileSync("/bin/bash", [filename, ...args], { env, stdio: "pipe" });
+  const env = {
+    ...process.env,
+    PATH: path.join(root, "tools"),
+    NORC_RPM_TEST_ROOT: root,
+    NORC_RPM_TEST_ALTERNATIVES_FAIL: alternativesFail ? "1" : "0",
+  };
+  const run = (filename, ...args) =>
+    execFileSync("/bin/bash", [filename, ...args], { env, stdio: "pipe" });
   const calls = async () => {
-    try { return (await readFile(path.join(root, "calls"), "utf8")).trim().split("\n").filter(Boolean).map(line => JSON.parse(line)); }
-    catch (error) { if (error.code === "ENOENT") return []; throw error; }
+    try {
+      return (await readFile(path.join(root, "calls"), "utf8"))
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+    } catch (error) {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    }
   };
   return { root, postTransaction, afterRemove, run, calls };
 }
 
 async function assertInstalled(root) {
-  assert.equal(await readlink(path.join(root, "usr/bin/norc")), path.join(root, "etc/alternatives/norc"));
-  assert.equal(await readlink(path.join(root, "etc/alternatives/norc")), path.join(root, "opt/Norc/norc"));
+  assert.equal(
+    await readlink(path.join(root, "usr/bin/norc")),
+    path.join(root, "etc/alternatives/norc"),
+  );
+  assert.equal(
+    await readlink(path.join(root, "etc/alternatives/norc")),
+    path.join(root, "opt/Norc/norc"),
+  );
   assert.equal(await readFile(path.join(root, "etc/apparmor.d/norc"), "utf8"), "new profile");
   assert.equal((await stat(path.join(root, "opt/Norc/chrome-sandbox"))).mode & 0o7777, 0o755);
 }
 
-test("RPM upgrade cleanup retains the command and AppArmor profile while another instance remains", async t => {
+test("RPM upgrade cleanup retains the command and AppArmor profile while another instance remains", async (t) => {
   const { root, postTransaction, afterRemove, run, calls } = await fixture(t);
   run(postTransaction, "1");
   const before = await calls();
@@ -75,7 +111,7 @@ test("RPM upgrade cleanup retains the command and AppArmor profile while another
   assert.deepEqual(await calls(), before);
 });
 
-test("RPM post-transaction repair restores integration removed by legacy package cleanup", async t => {
+test("RPM post-transaction repair restores integration removed by legacy package cleanup", async (t) => {
   const { root, postTransaction, run, calls } = await fixture(t);
   run(postTransaction, "2");
   // The legacy postun removes both after the new package's post has run.
@@ -86,10 +122,14 @@ test("RPM post-transaction repair restores integration removed by legacy package
   await assertInstalled(root);
   run(postTransaction, "1");
   await assertInstalled(root);
-  assert.equal((await calls()).filter(call => call[0] === "apparmor_parser" && call[1] === "--replace").length, 3);
+  assert.equal(
+    (await calls()).filter((call) => call[0] === "apparmor_parser" && call[1] === "--replace")
+      .length,
+    3,
+  );
 });
 
-test("RPM final removal cleans the registered alternative and unloads AppArmor", async t => {
+test("RPM final removal cleans the registered alternative and unloads AppArmor", async (t) => {
   const { root, postTransaction, afterRemove, run, calls } = await fixture(t);
   run(postTransaction, "1");
   run(afterRemove, "0");
@@ -97,12 +137,14 @@ test("RPM final removal cleans the registered alternative and unloads AppArmor",
     await assert.rejects(stat(path.join(root, filename)), { code: "ENOENT" });
   }
   const operations = await calls();
-  assert.deepEqual(operations.find(call => call[0] === "update-alternatives" && call[1] === "--remove"),
-    ["update-alternatives", "--remove", "norc", path.join(root, "opt/Norc/norc")]);
-  assert.ok(operations.some(call => call[0] === "apparmor_parser" && call[1] === "--remove"));
+  assert.deepEqual(
+    operations.find((call) => call[0] === "update-alternatives" && call[1] === "--remove"),
+    ["update-alternatives", "--remove", "norc", path.join(root, "opt/Norc/norc")],
+  );
+  assert.ok(operations.some((call) => call[0] === "apparmor_parser" && call[1] === "--remove"));
 });
 
-test("RPM integration works without an alternatives utility", async t => {
+test("RPM integration works without an alternatives utility", async (t) => {
   const { root, postTransaction, afterRemove, run } = await fixture(t, { alternatives: false });
   run(postTransaction, "1");
   assert.equal(await readlink(path.join(root, "usr/bin/norc")), path.join(root, "opt/Norc/norc"));
@@ -112,7 +154,7 @@ test("RPM integration works without an alternatives utility", async t => {
   await assert.rejects(stat(path.join(root, "usr/bin/norc")), { code: "ENOENT" });
 });
 
-test("RPM repair falls back to a direct link when alternative registration fails", async t => {
+test("RPM repair falls back to a direct link when alternative registration fails", async (t) => {
   const { root, postTransaction, run } = await fixture(t, { alternativesFail: true });
   run(postTransaction, "2");
   assert.equal(await readlink(path.join(root, "usr/bin/norc")), path.join(root, "opt/Norc/norc"));

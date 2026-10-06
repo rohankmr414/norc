@@ -11,11 +11,11 @@ This project is independent of Notion.
 Download a package from the [latest release](https://github.com/rohankmr414/norc/releases/latest),
 then install it from your downloads directory:
 
-| Distribution | Command |
-| --- | --- |
-| Fedora | `sudo dnf install ./norc-*.rpm` |
-| Debian / Ubuntu | `sudo apt install ./norc_*.deb` |
-| Arch Linux | `sudo pacman -U ./norc-*.pkg.tar.xz` |
+| Distribution    | Command                              |
+| --------------- | ------------------------------------ |
+| Fedora          | `sudo dnf install ./norc-*.rpm`      |
+| Debian / Ubuntu | `sudo apt install ./norc_*.deb`      |
+| Arch Linux      | `sudo pacman -U ./norc-*.pkg.tar.xz` |
 
 Launch **Norc** from your application menu or run `norc`.
 Browser sign-in requires an installed package; launching the unpacked app alone
@@ -58,6 +58,7 @@ From the repository:
 
 ```sh
 npm ci
+npm run format:check
 npm test
 npm run build
 ```
@@ -69,6 +70,9 @@ pass `-- --arch arm64` for ARM64. CI builds x86-64 packages.
 For another build, use `-- --reuse` to reuse the extracted app or
 `-- --output out-new` to download a fresh bundle. Install the resulting package
 to test browser sign-in locally.
+
+Use `npm run format` to format the source. Generated upstream bundles, packages
+and the npm lockfile are excluded.
 
 ## Releases
 

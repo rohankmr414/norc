@@ -1,0 +1,8 @@
+# Extracted upstream bundles and generated packages
+/out/
+/out-*/
+/norc-*/
+/app.asar
+
+# npm manages the lockfile formatting
+package-lock.json

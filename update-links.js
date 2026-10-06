@@ -11,10 +11,19 @@ const DESKTOP_DOWNLOAD_PATHS = new Set([
 function linuxUpdateUrl(value) {
   if (typeof value !== "string") return value;
   let url;
-  try { url = new URL(value); }
-  catch { return value; }
-  if (url.protocol !== "https:" || !NOTION_HOSTS.has(url.hostname) ||
-      url.port || url.username || url.password) return value;
+  try {
+    url = new URL(value);
+  } catch {
+    return value;
+  }
+  if (
+    url.protocol !== "https:" ||
+    !NOTION_HOSTS.has(url.hostname) ||
+    url.port ||
+    url.username ||
+    url.password
+  )
+    return value;
   return DESKTOP_DOWNLOAD_PATHS.has(url.pathname.replace(/\/$/, "")) ? RELEASE_URL : value;
 }
 
