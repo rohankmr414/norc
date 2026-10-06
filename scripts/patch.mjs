@@ -42,6 +42,19 @@ export async function patchApp({ output, arch = "x64" }) {
   mainSource = replaceOnce(mainSource, /\((?:process\.platform===`linux`\?`topLeft`:)?process\.platform===([`"'])darwin\1\?([`"'])topRight\2:([`"'])bottomRight\3\)/g,
     "(process.platform===`linux`?`topRight`:process.platform===`darwin`?`topRight`:`bottomRight`)", "reminder default corner",
     /\(process\.platform===`linux`\?`topRight`:process\.platform===`darwin`\?`topRight`:`bottomRight`\)/g);
+  // Retain upstream's allowed schemes and macOS/Windows lookup paths.
+  mainSource = replaceOnce(mainSource, /process\.platform===([`"'])win32\1\?([\w$]+)\(([\w$]+)\):!1:!1/g,
+    "process.platform===`win32`?$2($3):process.platform===`linux`?require(`./protocol-handlers.js`).isProtocolRegistered($3):!1:!1", "protocol lookup",
+    /process\.platform===`linux`\?require\(`\.\/protocol-handlers\.js`\)\.isProtocolRegistered\([\w$]+\):!1:!1/g);
+  // Linux reads the hidden-start preference from the actual desktop entry.
+  mainSource = replaceOnce(mainSource, /return ([\w$]+)\(\)\|\|\(([\w$]+)\.openAsHidden=([\w$]+)\.get\(([\w$]+)\)===!0\),\2/g,
+    "return process.platform===`linux`||$1()||($2.openAsHidden=$3.get($4)===!0),$2", "login-item settings",
+    /return process\.platform===`linux`\|\|[\w$]+\(\)\|\|\([\w$]+\.openAsHidden=[\w$]+\.get\([\w$]+\)===!0\),[\w$]+/g);
+  // The login launch's explicit flag remains valid if settings change before
+  // the renderer becomes ready; normal launches still show the calendar.
+  mainSource = replaceOnce(mainSource, /([\w$]+)\(\)\.openAsHidden&&([\w$]+)\(\)&&!([\w$]+)/g,
+    "(process.platform===`linux`?process.argv.includes(`--norc-start-hidden`):$1().openAsHidden)&&$2()&&!$3", "background autostart",
+    /\(process\.platform===`linux`\?process\.argv\.includes\(`--norc-start-hidden`\):[\w$]+\(\)\.openAsHidden\)&&[\w$]+\(\)&&![\w$]+/g);
   Object.assign(data, {
     name: "norc", productName: "Norc", desktopName: "norc.desktop", version,
     description: "Unofficial Notion Calendar desktop app for Linux",
@@ -72,6 +85,9 @@ export async function patchApp({ output, arch = "x64" }) {
   await writeJson(path.join(output, "build/main/upstream.json"), upstream);
   await copyFile(path.join(ROOT, "linux.js"), path.join(output, "build/main/linux.js"));
   await copyFile(path.join(ROOT, "system-settings.js"), path.join(output, "build/main/system-settings.js"));
+  for (const filename of ["autostart.js", "desktop-entry.js", "protocol-handlers.js"]) {
+    await copyFile(path.join(ROOT, filename), path.join(output, "build/main", filename));
+  }
   await writeJson(manifest, data);
   console.info(`Configured Norc ${version} with Notion Calendar ${upstream.version} for ${arch}`);
 }

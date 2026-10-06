@@ -6,13 +6,14 @@ const test = require("node:test");
 const vm = require("node:vm");
 const source = fs.readFileSync(path.join(__dirname, "../linux.js"), "utf8");
 
-function setup({ lock = true, argv = [], minimumVersion = "1.137.0", settingsError } = {}) {
+function setup({ lock = true, argv = [], minimumVersion = "1.137.0", settingsError, autostartError } = {}) {
   const app = new EventEmitter();
   app.userAgentFallback = "Mozilla/5.0 (X11; Linux x86_64) Chrome/146.0 Norc/1.139.0 Electron/41.5.0";
   app.requestSingleInstanceLock = () => lock;
   app.quit = () => { app.quitCalled = true; };
   app.getAppPath = () => "/app";
   app.getVersion = () => "1.139.0";
+  app.isPackaged = true;
   const ipcMain = new EventEmitter();
   const handlers = new Map();
   ipcMain.handle = (name, handler) => {
@@ -25,14 +26,26 @@ function setup({ lock = true, argv = [], minimumVersion = "1.137.0", settingsErr
   const settingsCalls = [];
   const settingsMessages = [];
   const electronUtil = {};
+  const autostartCalls = [];
+  const autostart = {
+    getLoginItemSettings: () => ({ openAtLogin: autostartCalls.at(-1)?.openAtLogin ?? false, openAsHidden: false, wasOpenedAtLogin: argv.includes("--from-login") }),
+    setLoginItemSettings: options => {
+      if (autostartError) throw autostartError;
+      autostartCalls.push(options);
+    },
+  };
   const dialog = { showMessageBox: async options => { settingsMessages.push(options); } };
   let loaded = false;
   const context = {
-    process: { platform: "linux", argv, env: {} }, console, AbortSignal, URL,
+    process: { platform: "linux", argv, env: {}, execPath: "/opt/Norc/norc-bin" }, console, AbortSignal, URL,
     require(name) {
       if (name === "electron") return { app, dialog, ipcMain, net, BrowserWindow: { getAllWindows: () => windows } };
       if (name === "electron-updater") return { autoUpdater };
       if (name === "electron-util") return electronUtil;
+      if (name === "./autostart.js") return { createAutostart: ({ command }) => {
+        assert.deepEqual(Array.from(command), ["/opt/Norc/norc"]);
+        return autostart;
+      } };
       if (name === "./system-settings.js") return { openSystemSettings: async pane => {
         settingsCalls.push(pane);
         if (settingsError) throw settingsError;
@@ -59,8 +72,34 @@ function setup({ lock = true, argv = [], minimumVersion = "1.137.0", settingsErr
     app.emit("browser-window-created", {}, window);
     return window;
   }
-  return { app, ipcMain, autoUpdater, electronUtil, settingsCalls, settingsMessages, loaded, createWindow, context, handlers };
+  return { app, ipcMain, autoUpdater, electronUtil, settingsCalls, settingsMessages, autostartCalls, loaded, createWindow, context, handlers };
 }
+
+test("the Linux login-item APIs delegate to XDG autostart", () => {
+  const state = setup({ argv: ["norc", "--from-login"] });
+  state.app.setLoginItemSettings({ openAtLogin: true });
+  assert.equal(state.app.getLoginItemSettings().openAtLogin, true);
+  assert.equal(state.app.getLoginItemSettings().wasOpenedAtLogin, true);
+  assert.deepEqual(state.autostartCalls, [{ openAtLogin: true }]);
+});
+
+test("failed autostart writes show an error and do not report success to upstream", () => {
+  const state = setup({ autostartError: new Error("Permission denied") });
+  assert.throws(() => state.app.setLoginItemSettings({ openAtLogin: true }), /Permission denied/);
+  assert.equal(state.app.getLoginItemSettings().openAtLogin, false);
+  assert.equal(state.settingsMessages[0].title, "Start at login");
+});
+
+test("background autostart does not focus an already running instance, but OAuth still does", () => {
+  const state = setup();
+  const window = state.createWindow();
+  state.ipcMain.emit("cronReady", { sender: window.webContents });
+  state.app.emit("second-instance", {}, ["norc", "--from-login", "--norc-start-hidden"]);
+  assert.equal(window.shown, undefined);
+  state.app.emit("second-instance", {}, ["norc", "--from-login", "--norc-start-hidden", "cron://oauth/test"]);
+  assert.equal(window.shown, true);
+  assert.equal(window.sent[0].url, "cron://oauth/test");
+});
 
 test("the upstream System Settings helper opens the Linux notification settings", async () => {
   const state = setup();

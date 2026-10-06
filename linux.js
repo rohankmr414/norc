@@ -19,12 +19,25 @@ if (process.platform !== "linux") {
       /\([^)]*Linux[^)]*\)/,
       "(Windows NT 10.0; Win64; x64)",
     );
-  // Electron's login-item APIs are implemented only on macOS and Windows.
-  app.getLoginItemSettings = () => ({
-    openAtLogin: false, openAsHidden: false, wasOpenedAtLogin: false,
-  });
-  app.setLoginItemSettings = () => {
-    console.info("Configure Norc autostart in your desktop's startup settings.");
+  // XDG autostart works across Linux desktops. Use the packaged wrapper so
+  // startup retains its XWayland default and command-line handling.
+  const { createAutostart } = require("./autostart.js");
+  const command = app.isPackaged
+    ? [path.join(path.dirname(process.execPath), "norc")]
+    : [process.execPath, "--ozone-platform=x11", app.getAppPath()];
+  const autostart = createAutostart({ command });
+  app.getLoginItemSettings = autostart.getLoginItemSettings;
+  app.setLoginItemSettings = options => {
+    try {
+      autostart.setLoginItemSettings(options);
+    } catch (error) {
+      dialog.showMessageBox({
+        type: "error", title: "Start at login", message: "Could not update start at login",
+        detail: "Check that your user configuration directory is writable, then try again.",
+      }).catch(dialogError => console.warn("Unable to show autostart error:", dialogError.message));
+      // Upstream must not record a successful settings change after a failure.
+      throw error;
+    }
   };
   // The official update feed contains macOS/Windows binaries, not this build.
   const { autoUpdater } = require("electron-updater");
@@ -59,7 +72,9 @@ if (process.platform !== "linux") {
     }
   }
   function handleArguments(argv) {
-    pendingLinks.push(...argv.filter((argument) => /^cron:\/\//i.test(argument)));
+    const links = argv.filter((argument) => /^cron:\/\//i.test(argument));
+    pendingLinks.push(...links);
+    if (!links.length && argv.includes("--from-login") && argv.includes("--norc-start-hidden")) return;
     const window = mainWindow || BrowserWindow.getAllWindows()[0];
     if (window && !window.isDestroyed()) {
       if (window.isMinimized()) window.restore();
