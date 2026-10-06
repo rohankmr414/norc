@@ -51,6 +51,10 @@ test("packages preserve the Norc identity, upstream version, runtime and OAuth p
   assert.deepEqual(data.build.protocols[0].schemes, ["cron"]);
   assert.deepEqual(data.build.linux.target, ["deb", "pacman", "rpm"]);
   assert.equal(data.build.rpm.artifactName, "norc-1.139.0-1.x86_64.rpm");
+  assert.equal(data.build.rpm.afterRemove, path.join(output, ".norc-rpm/after-remove.sh"));
+  assert.deepEqual(data.build.rpm.fpm, ["--rpm-posttrans", path.join(output, ".norc-rpm/post-transaction.sh")]);
+  assert.equal(data.build.deb.afterRemove, undefined);
+  assert.equal(data.build.pacman.afterRemove, undefined);
   assert.equal(data.build.pacman.artifactName, "norc-1.139.0-1-x86_64.pkg.tar.xz");
   assert.equal(data.packageManager, undefined);
   assert.equal(data.config, undefined);

@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   ROOT, TARGETS, artifactNames, cli, exists, parseOptions, readJson, validateVersion, writeJson,
 } from "./common.mjs";
+import { prepareRpmScripts } from "./rpm.mjs";
 
 function replaceOnce(source, pattern, replacement, description, appliedPattern) {
   const count = [...source.matchAll(pattern)].length;
@@ -55,6 +56,7 @@ export async function patchApp({ output, arch = "x64" }) {
   mainSource = replaceOnce(mainSource, /([\w$]+)\(\)\.openAsHidden&&([\w$]+)\(\)&&!([\w$]+)/g,
     "(process.platform===`linux`?process.argv.includes(`--norc-start-hidden`):$1().openAsHidden)&&$2()&&!$3", "background autostart",
     /\(process\.platform===`linux`\?process\.argv\.includes\(`--norc-start-hidden`\):[\w$]+\(\)\.openAsHidden\)&&[\w$]+\(\)&&![\w$]+/g);
+  const rpmScripts = await prepareRpmScripts(output);
   Object.assign(data, {
     name: "norc", productName: "Norc", desktopName: "norc.desktop", version,
     description: "Unofficial Notion Calendar desktop app for Linux",
@@ -71,7 +73,7 @@ export async function patchApp({ output, arch = "x64" }) {
         desktop: { entry: { Name: "Norc", Comment: "Unofficial Notion Calendar desktop app for Linux" } },
       },
       deb: { packageName: "norc", artifactName: names.deb },
-      rpm: { packageName: "norc", artifactName: names.rpm },
+      rpm: { packageName: "norc", artifactName: names.rpm, ...rpmScripts },
       pacman: { packageName: "norc", artifactName: names.pacman, compression: "xz" },
       // The official OAuth callback protocol is still cron://.
       protocols: [{ name: "Notion Calendar", schemes: ["cron"] }],
