@@ -32,6 +32,9 @@ Enable **start at login** in Settings → General to use your desktop's standard
 autostart mechanism. Installed Zoom and Notion apps are detected through Linux's
 registered link handlers.
 
+Open `.ics` or `.vcs` files with Norc from your file manager, or run
+`norc /path/to/event.ics` to import them.
+
 Norc defaults to X11 (XWayland on Wayland desktops) and shows floating meeting
 reminders at the top right without taking focus. To use native Wayland, fully quit Norc
 and run `norc --ozone-platform=wayland`; reminder placement is then

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import vm from "node:vm";
+import { LinuxTargetHelper } from "app-builder-lib/out/targets/LinuxTargetHelper.js";
 import { buildApp } from "../scripts/build.mjs";
 import { artifactNames, readJson, writeJson } from "../scripts/common.mjs";
 import { extractIcons, prepareApp } from "../scripts/extract.mjs";
@@ -50,6 +51,7 @@ test("packages preserve the Norc identity, upstream version, runtime and OAuth p
   assert.equal(data.devDependencies.electron, "41.5.0");
   assert.deepEqual(data.build.protocols[0].schemes, ["cron"]);
   assert.deepEqual(data.build.linux.target, ["deb", "pacman", "rpm"]);
+  assert.deepEqual(data.build.linux.mimeTypes, ["text/calendar", "text/x-vcalendar"]);
   assert.equal(data.build.rpm.artifactName, "norc-1.139.0-1.x86_64.rpm");
   assert.equal(data.build.rpm.afterRemove, path.join(output, ".norc-rpm/after-remove.sh"));
   assert.deepEqual(data.build.rpm.fpm, ["--rpm-posttrans", path.join(output, ".norc-rpm/post-transaction.sh")]);
@@ -61,9 +63,24 @@ test("packages preserve the Norc identity, upstream version, runtime and OAuth p
   assert.equal((await readJson(path.join(output, "build/main/upstream.json"))).version, "1.139.0");
   assert.match(await readFile(path.join(output, "build/main/main.js"), "utf8"), /title:`Norc`.*platform===`darwin`/);
   assert.match(await readFile(path.join(output, "build/preload/preload-bundle.js"), "utf8"), /platform===`linux`/);
-  for (const filename of ["autostart.js", "desktop-entry.js", "protocol-handlers.js"]) {
+  for (const filename of ["autostart.js", "desktop-entry.js", "protocol-handlers.js", "calendar-files.js"]) {
     assert.equal(await readFile(path.join(output, "build/main", filename), "utf8"), await readFile(new URL(`../${filename}`, import.meta.url), "utf8"));
   }
+});
+test("desktop integration advertises calendar files and retains OAuth URL arguments", async t => {
+  const output = await fixture(t);
+  await patchApp({ output });
+  const data = await readJson(path.join(output, "package.json"));
+  const helper = {
+    packager: {
+      appInfo: { productName: "Norc", sanitizedProductName: "Norc" }, executableName: "norc",
+      info: { metadata: data }, config: data.build, platformSpecificBuildOptions: data.build.linux, fileAssociations: [],
+    },
+    getDescription: () => data.description,
+  };
+  const desktop = await LinuxTargetHelper.prototype.computeDesktopEntry.call(helper, data.build.linux);
+  assert.match(desktop, /^Exec=\/opt\/Norc\/norc %U$/m);
+  assert.match(desktop, /^MimeType=text\/calendar;text\/x-vcalendar;x-scheme-handler\/cron;$/m);
 });
 test("protocol patch uses Linux lookup while preserving the allowlist and upstream platforms", async (t) => {
   const output = await fixture(t);

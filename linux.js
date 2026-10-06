@@ -64,33 +64,78 @@ if (process.platform !== "linux") {
 
   let mainWindow;
   let rendererReady = false;
+  let calendarReady = false;
   const pendingLinks = [];
+  const pendingFiles = [];
+  const { calendarFileArguments, readCalendarFile } = require("./calendar-files.js");
+  let deliveringFiles = false;
+  function focusWindow(window) {
+    if (!window || window.isDestroyed()) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+  }
   function deliverLinks() {
     if (!rendererReady || !mainWindow || mainWindow.isDestroyed()) return;
     while (pendingLinks.length) {
       mainWindow.webContents.send("cronHandleDeepLink", { url: pendingLinks.shift() });
     }
   }
-  function handleArguments(argv) {
-    const links = argv.filter((argument) => /^cron:\/\//i.test(argument));
-    pendingLinks.push(...links);
-    if (!links.length && argv.includes("--from-login") && argv.includes("--norc-start-hidden")) return;
-    const window = mainWindow || BrowserWindow.getAllWindows()[0];
-    if (window && !window.isDestroyed()) {
-      if (window.isMinimized()) window.restore();
-      window.show();
-      window.focus();
+  async function deliverFiles() {
+    if (deliveringFiles) return;
+    deliveringFiles = true;
+    try {
+      while (calendarReady && mainWindow && !mainWindow.isDestroyed() && pendingFiles.length) {
+        const filename = pendingFiles[0];
+        const window = mainWindow;
+        let payload, error;
+        try { payload = await readCalendarFile(filename); }
+        catch (readError) { error = readError; }
+        // A reload or replacement window must install its importer first.
+        if (!calendarReady || mainWindow !== window || window.isDestroyed()) return;
+        pendingFiles.shift();
+        try {
+          if (error) throw error;
+          focusWindow(window);
+          window.webContents.send("cronNativeFileOpen", payload);
+        } catch (openError) {
+          console.warn("Unable to open calendar file:", openError.message);
+          dialog.showMessageBox({
+            type: "error", title: "Open calendar file", message: "Could not open calendar file",
+            detail: `Check that “${path.basename(filename)}” is a readable .ics or .vcs file, then try again.`,
+          }).catch(dialogError => console.warn("Unable to show file-opening error:", dialogError.message));
+        }
+      }
+    } finally {
+      deliveringFiles = false;
+      if (calendarReady && mainWindow && !mainWindow.isDestroyed() && pendingFiles.length) {
+        void deliverFiles();
+      }
     }
+  }
+  function handleArguments(argv, workingDirectory) {
+    const links = argv.filter((argument) => /^cron:\/\//i.test(argument));
+    const files = calendarFileArguments(argv, workingDirectory);
+    pendingLinks.push(...links);
+    pendingFiles.push(...files);
+    if (!links.length && !files.length && argv.includes("--from-login") && argv.includes("--norc-start-hidden")) return;
+    const window = mainWindow || BrowserWindow.getAllWindows()[0];
+    focusWindow(window);
     deliverLinks();
+    void deliverFiles();
   }
   app.on("browser-window-created", (_event, window) => {
     if (mainWindow && !mainWindow.isDestroyed()) return;
     mainWindow = window;
     rendererReady = false;
+    calendarReady = false;
     window.setIcon(path.join(app.getAppPath(), "build/icons/512x512.png"));
     window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
       // History updates keep the preload and its IPC listeners alive.
-      if (isMainFrame && !isInPlace) rendererReady = false;
+      if (isMainFrame && !isInPlace) {
+        rendererReady = false;
+        calendarReady = false;
+      }
     });
     // Notion's authentication preload installs its deep-link listener before
     // DOM ready, but the sign-in page does not send the calendar's cronReady.
@@ -105,11 +150,13 @@ if (process.platform !== "linux") {
   ipcMain.on("cronReady", (event) => {
     if (mainWindow && event.sender === mainWindow.webContents) {
       rendererReady = true;
+      calendarReady = true;
       deliverLinks();
+      void deliverFiles();
     }
   });
-  app.on("second-instance", (_event, argv) => handleArguments(argv));
-  handleArguments(process.argv);
+  app.on("second-instance", (_event, argv, workingDirectory) => handleArguments(argv, workingDirectory || process.cwd()));
+  handleArguments(process.argv, process.cwd());
   require("./main.js");
 
   // The current Notion login page invokes this IPC even though the downloaded

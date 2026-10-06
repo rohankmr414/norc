@@ -70,6 +70,7 @@ export async function patchApp({ output, arch = "x64" }) {
       linux: {
         target: TARGETS, category: "Office;Calendar", executableName: "norc",
         icon: "build/icons", syncDesktopName: true,
+        mimeTypes: ["text/calendar", "text/x-vcalendar"],
         desktop: { entry: { Name: "Norc", Comment: "Unofficial Notion Calendar desktop app for Linux" } },
       },
       deb: { packageName: "norc", artifactName: names.deb },
@@ -87,7 +88,7 @@ export async function patchApp({ output, arch = "x64" }) {
   await writeJson(path.join(output, "build/main/upstream.json"), upstream);
   await copyFile(path.join(ROOT, "linux.js"), path.join(output, "build/main/linux.js"));
   await copyFile(path.join(ROOT, "system-settings.js"), path.join(output, "build/main/system-settings.js"));
-  for (const filename of ["autostart.js", "desktop-entry.js", "protocol-handlers.js"]) {
+  for (const filename of ["autostart.js", "desktop-entry.js", "protocol-handlers.js", "calendar-files.js"]) {
     await copyFile(path.join(ROOT, filename), path.join(output, "build/main", filename));
   }
   await writeJson(manifest, data);

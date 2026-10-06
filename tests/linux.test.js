@@ -1,12 +1,14 @@
 const assert = require("node:assert/strict");
-const { EventEmitter } = require("node:events");
+const { EventEmitter, once } = require("node:events");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const { calendarFileArguments } = require("../calendar-files.js");
 const source = fs.readFileSync(path.join(__dirname, "../linux.js"), "utf8");
 
-function setup({ lock = true, argv = [], minimumVersion = "1.137.0", settingsError, autostartError } = {}) {
+function setup({ lock = true, argv = [], minimumVersion = "1.137.0", settingsError, autostartError,
+  workingDirectory = "/launch", readCalendarFile = async filename => ({ path: filename, contents: "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n" }) } = {}) {
   const app = new EventEmitter();
   app.userAgentFallback = "Mozilla/5.0 (X11; Linux x86_64) Chrome/146.0 Norc/1.139.0 Electron/41.5.0";
   app.requestSingleInstanceLock = () => lock;
@@ -27,6 +29,7 @@ function setup({ lock = true, argv = [], minimumVersion = "1.137.0", settingsErr
   const settingsMessages = [];
   const electronUtil = {};
   const autostartCalls = [];
+  const fileReads = [];
   const autostart = {
     getLoginItemSettings: () => ({ openAtLogin: autostartCalls.at(-1)?.openAtLogin ?? false, openAsHidden: false, wasOpenedAtLogin: argv.includes("--from-login") }),
     setLoginItemSettings: options => {
@@ -37,11 +40,15 @@ function setup({ lock = true, argv = [], minimumVersion = "1.137.0", settingsErr
   const dialog = { showMessageBox: async options => { settingsMessages.push(options); } };
   let loaded = false;
   const context = {
-    process: { platform: "linux", argv, env: {}, execPath: "/opt/Norc/norc-bin" }, console, AbortSignal, URL,
+    process: { platform: "linux", argv, env: {}, execPath: "/opt/Norc/norc-bin", cwd: () => workingDirectory }, console, AbortSignal, URL,
     require(name) {
       if (name === "electron") return { app, dialog, ipcMain, net, BrowserWindow: { getAllWindows: () => windows } };
       if (name === "electron-updater") return { autoUpdater };
       if (name === "electron-util") return electronUtil;
+      if (name === "./calendar-files.js") return { calendarFileArguments, readCalendarFile: async filename => {
+        fileReads.push(filename);
+        return readCalendarFile(filename);
+      } };
       if (name === "./autostart.js") return { createAutostart: ({ command }) => {
         assert.deepEqual(Array.from(command), ["/opt/Norc/norc"]);
         return autostart;
@@ -61,10 +68,14 @@ function setup({ lock = true, argv = [], minimumVersion = "1.137.0", settingsErr
   function createWindow(url = "https://calendar.notion.so") {
     const webContents = new EventEmitter();
     const sent = [];
-    webContents.send = (channel, data) => sent.push({ channel, ...data });
+    webContents.send = (channel, data) => {
+      const message = { channel, ...data };
+      sent.push(message);
+      webContents.emit("message-sent", message);
+    };
     webContents.getURL = () => url;
     const window = {
-      webContents, sent, isDestroyed: () => false, isMinimized: () => true,
+      webContents, sent, destroyed: false, isDestroyed() { return this.destroyed; }, isMinimized: () => true,
       restore() { this.restored = true; }, show() { this.shown = true; },
       focus() { this.focused = true; }, setIcon(icon) { this.icon = icon; },
     };
@@ -72,8 +83,138 @@ function setup({ lock = true, argv = [], minimumVersion = "1.137.0", settingsErr
     app.emit("browser-window-created", {}, window);
     return window;
   }
-  return { app, ipcMain, autoUpdater, electronUtil, settingsCalls, settingsMessages, autostartCalls, loaded, createWindow, context, handlers };
+  return { app, ipcMain, autoUpdater, electronUtil, settingsCalls, settingsMessages, autostartCalls, fileReads, loaded, createWindow, context, handlers };
 }
+
+const flush = () => new Promise(resolve => setImmediate(resolve));
+
+test("a real local calendar file reaches the bridge's importer with its unchanged contents", async t => {
+  const fsp = require("node:fs/promises");
+  const { pathToFileURL } = require("node:url");
+  const directory = await fsp.mkdtemp(path.join(require("node:os").tmpdir(), "norc-import-"));
+  t.after(() => fsp.rm(directory, { recursive: true, force: true }));
+  const filename = path.join(directory, "Meeting ✓.VCS");
+  const contents = "BEGIN:VCALENDAR\r\nVERSION:1.0\r\nEND:VCALENDAR\r\n";
+  await fsp.writeFile(filename, contents);
+  const state = setup({ argv: ["norc", pathToFileURL(filename).href],
+    readCalendarFile: require("../calendar-files.js").readCalendarFile });
+  const window = state.createWindow();
+  const delivery = once(window.webContents, "message-sent");
+  state.ipcMain.emit("cronReady", { sender: window.webContents });
+  const [message] = await delivery;
+  assert.deepEqual(message, { channel: "cronNativeFileOpen", path: path.join(directory, "Meeting ✓.vcs"), contents });
+});
+
+test("calendar files launched at startup wait through sign-in for the calendar importer", async () => {
+  const state = setup({ argv: ["norc", "event.ics", "file:///launch/other.vcs", "cron://oauth/test"] });
+  const window = state.createWindow("https://www.notion.so/login/calendar");
+  window.webContents.emit("dom-ready");
+  await flush();
+  assert.deepEqual(state.fileReads, []);
+  assert.deepEqual(window.sent, [{ channel: "cronHandleDeepLink", url: "cron://oauth/test" }]);
+  state.ipcMain.emit("cronReady", { sender: {} });
+  await flush();
+  assert.deepEqual(state.fileReads, []);
+  state.ipcMain.emit("cronReady", { sender: window.webContents });
+  await flush();
+  assert.deepEqual(state.fileReads, ["/launch/event.ics", "/launch/other.vcs"]);
+  assert.deepEqual(window.sent.filter(message => message.channel === "cronNativeFileOpen").map(message => message.path), state.fileReads);
+  assert.ok(window.restored && window.shown && window.focused);
+});
+
+test("a running instance resolves relative calendar paths from the second launch's directory", async () => {
+  const state = setup();
+  const window = state.createWindow();
+  state.ipcMain.emit("cronReady", { sender: window.webContents });
+  state.app.emit("second-instance", {}, ["norc", "meetings/event.ics", "file:///another/calendar.vcs"], "/second");
+  await flush();
+  assert.deepEqual(state.fileReads, ["/second/meetings/event.ics", "/another/calendar.vcs"]);
+  assert.equal(window.sent.length, 2);
+  assert.ok(window.focused);
+});
+
+test("calendar requests during reload retain their order and are delivered only once", async () => {
+  const state = setup({ argv: ["norc", "/first.ics"] });
+  const window = state.createWindow();
+  window.webContents.emit("did-start-navigation", {}, "https://calendar.notion.so", false, true);
+  state.app.emit("second-instance", {}, ["norc", "later.vcs"], "/second");
+  await flush();
+  assert.equal(window.sent.length, 0);
+  state.ipcMain.emit("cronReady", { sender: window.webContents });
+  state.ipcMain.emit("cronReady", { sender: window.webContents });
+  await flush();
+  assert.deepEqual(window.sent.map(message => message.path), ["/first.ics", "/second/later.vcs"]);
+});
+
+test("a reload during a calendar read keeps the file queued until the importer is ready again", async () => {
+  let release;
+  const state = setup({ argv: ["/event.ics"], readCalendarFile: filename => new Promise(resolve => {
+    release = () => resolve({ path: filename, contents: "calendar contents" });
+  }) });
+  const window = state.createWindow();
+  state.ipcMain.emit("cronReady", { sender: window.webContents });
+  window.webContents.emit("did-start-navigation", {}, "https://calendar.notion.so", false, true);
+  release();
+  await flush();
+  assert.equal(window.sent.length, 0);
+  state.ipcMain.emit("cronReady", { sender: window.webContents });
+  release();
+  await flush();
+  assert.deepEqual(window.sent, [{ channel: "cronNativeFileOpen", path: "/event.ics", contents: "calendar contents" }]);
+});
+
+test("a replacement calendar window receives pending files after the old window closes", async () => {
+  let release;
+  const state = setup({ argv: ["/event.ics"], readCalendarFile: filename => new Promise(resolve => {
+    release = () => resolve({ path: filename, contents: "calendar contents" });
+  }) });
+  const oldWindow = state.createWindow();
+  state.ipcMain.emit("cronReady", { sender: oldWindow.webContents });
+  oldWindow.destroyed = true;
+  const window = state.createWindow();
+  release();
+  await flush();
+  assert.equal(oldWindow.sent.length, 0);
+  assert.equal(window.sent.length, 0);
+  state.ipcMain.emit("cronReady", { sender: window.webContents });
+  release();
+  await flush();
+  assert.equal(window.sent[0].path, "/event.ics");
+});
+
+test("failed calendar reads show guidance and do not discard later valid files", async () => {
+  const state = setup({ argv: ["/missing.ics", "/valid.vcs"], readCalendarFile: async filename => {
+    if (filename === "/missing.ics") throw new Error("ENOENT");
+    return { path: filename, contents: "valid calendar" };
+  } });
+  const window = state.createWindow();
+  state.ipcMain.emit("cronReady", { sender: window.webContents });
+  await flush();
+  assert.equal(state.settingsMessages[0].title, "Open calendar file");
+  assert.match(state.settingsMessages[0].detail, /missing\.ics/);
+  assert.deepEqual(window.sent, [{ channel: "cronNativeFileOpen", path: "/valid.vcs", contents: "valid calendar" }]);
+});
+
+test("an explicit calendar open takes precedence over hidden autostart", async () => {
+  const state = setup();
+  const window = state.createWindow();
+  state.ipcMain.emit("cronReady", { sender: window.webContents });
+  state.app.emit("second-instance", {}, ["norc", "--from-login", "--norc-start-hidden", "event.ics"], "/second");
+  await flush();
+  assert.equal(window.sent[0].path, "/second/event.ics");
+  assert.ok(window.focused);
+});
+
+test("same-document and subframe navigation preserve the calendar importer", async () => {
+  const state = setup();
+  const window = state.createWindow();
+  state.ipcMain.emit("cronReady", { sender: window.webContents });
+  window.webContents.emit("did-start-navigation", {}, "https://calendar.notion.so?date=test", true, true);
+  window.webContents.emit("did-start-navigation", {}, "https://example.com", false, false);
+  state.app.emit("second-instance", {}, ["norc", "/event.ics"]);
+  await flush();
+  assert.equal(window.sent[0].path, "/event.ics");
+});
 
 test("the Linux login-item APIs delegate to XDG autostart", () => {
   const state = setup({ argv: ["norc", "--from-login"] });
