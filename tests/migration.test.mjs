@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -382,6 +382,64 @@ test("a release tag for another upstream version fails before patching or instal
     /must match upstream Notion Calendar version: v1\.139\.0/,
   );
   assert.deepEqual(await snapshot(output), before);
+});
+test("a conflicting package revision or upstream checksum fails before modifying the extraction", async (t) => {
+  const output = await fixture(t);
+  const before = await snapshot(output);
+  await assert.rejects(
+    buildApp({
+      output,
+      targets: ["rpm"],
+      arch: "x64",
+      reuse: true,
+      revision: 3,
+      "release-tag": "v1.139.0-linux.2",
+    }),
+    /package revision/,
+  );
+  await assert.rejects(
+    buildApp({
+      output,
+      targets: ["rpm"],
+      arch: "x64",
+      reuse: true,
+      "upstream-sha256": "a".repeat(64),
+    }),
+    /pinned release checksum/,
+  );
+  assert.deepEqual(await snapshot(output), before);
+});
+test("pinned DMG checksums are checked before invoking the archive extractor", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "norc-pinned-dmg-"));
+  const previousPath = process.env.PATH;
+  t.after(async () => {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    await rm(directory, { recursive: true, force: true });
+  });
+  const extractor = path.join(directory, "7zz");
+  await writeFile(extractor, "#!/bin/sh\nexit 99\n");
+  await chmod(extractor, 0o755);
+  process.env.PATH = directory;
+  const dmg = path.join(directory, "upstream.dmg");
+  await writeFile(dmg, "unexpected archive contents");
+  await assert.rejects(
+    prepareApp({ output: path.join(directory, "output"), dmg, "upstream-sha256": "a".repeat(64) }),
+    /pinned release checksum/,
+  );
+  assert.deepEqual((await readdir(directory)).sort(), ["7zz", "upstream.dmg"]);
+});
+test("package revisions reach each native package without changing the app or Electron version", async (t) => {
+  const output = await fixture(t);
+  await patchApp({ output, revision: 2 });
+  const data = await readJson(path.join(output, "package.json"));
+  assert.equal(data.version, "1.139.0");
+  assert.equal(data.build.buildNumber, "2");
+  assert.equal(data.build.electronVersion, "41.5.0");
+  assert.equal(data.build.rpm.artifactName, "norc-1.139.0-2.x86_64.rpm");
+  assert.equal(data.build.deb.artifactName, "norc_1.139.0-2_amd64.deb");
+  assert.equal(data.build.pacman.artifactName, "norc-1.139.0-2-x86_64.pkg.tar.xz");
+  assert.deepEqual(data.build.protocols[0].schemes, ["cron"]);
 });
 test("embedded PNG icons are extracted unchanged and malformed ICNS is rejected", async (t) => {
   const output = await fixture(t);

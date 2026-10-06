@@ -1,8 +1,8 @@
 import { appendFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import semver from "semver";
-import { DOWNLOAD_URL, cli, validateVersion } from "./common.mjs";
-import { githubGet } from "./github.mjs";
+import { DOWNLOAD_URL, cli, releaseIdentity, validateVersion } from "./common.mjs";
+import { githubGet, githubReleases } from "./github.mjs";
 
 export function upstreamFromUrl(downloadUrl) {
   const url = new URL(downloadUrl);
@@ -26,9 +26,16 @@ export async function discoverUpstream({ url = DOWNLOAD_URL, fetchImpl = fetch }
 export function planUpdate(upstream, releases, tagExists = false) {
   validateVersion(upstream.version);
   const published = releases.filter((release) => !release.draft);
-  const existing = published.find((release) => release.tag_name === upstream.tag);
+  const identity = (release) => {
+    try {
+      return releaseIdentity(release.tag_name);
+    } catch {
+      return null;
+    }
+  };
+  const existing = published.find((release) => identity(release)?.version === upstream.version);
   const newer = published.find((release) => {
-    const version = release.tag_name?.startsWith("v") ? release.tag_name.slice(1) : null;
+    const version = identity(release)?.version;
     return semver.valid(version) && semver.gt(version, upstream.version);
   });
   const available = !existing && !newer;
@@ -46,7 +53,7 @@ export function planUpdate(upstream, releases, tagExists = false) {
 export async function checkUpstream({ repo, url, fetchImpl = fetch } = {}) {
   const upstream = await discoverUpstream({ url, fetchImpl });
   const options = { repo, fetchImpl };
-  const releases = await githubGet("releases?per_page=100", options);
+  const releases = await githubReleases(options);
   const existing = await githubGet(`releases/tags/${encodeURIComponent(upstream.tag)}`, {
     ...options,
     allowMissing: true,

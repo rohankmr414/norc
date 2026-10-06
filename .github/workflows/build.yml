@@ -3,7 +3,7 @@ name: Norc Linux
 on:
   push:
     branches: ["**"]
-    tags: ["v*"]
+    tags: ["v*", "!v*-linux.*"]
     paths-ignore:
       - "**/*.md"
   pull_request:

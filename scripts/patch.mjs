@@ -8,6 +8,7 @@ import {
   exists,
   parseOptions,
   readJson,
+  validateRevision,
   validateVersion,
   writeJson,
 } from "./common.mjs";
@@ -21,14 +22,15 @@ function replaceOnce(source, pattern, replacement, description, appliedPattern) 
     throw new Error(`Upstream ${description} changed: expected one match, found ${count}`);
   return source.replace(pattern, replacement);
 }
-export async function patchApp({ output, arch = "x64" }) {
+export async function patchApp({ output, arch = "x64", revision = 1 }) {
+  revision = validateRevision(revision);
   const manifest = path.join(output, "package.json");
   const data = await readJson(manifest);
   const upstream = await readJson(path.join(output, ".norc-upstream.json"));
   validateVersion(upstream.version);
   validateVersion(upstream.electronVersion);
   const version = upstream.version;
-  const names = artifactNames(version, arch);
+  const names = artifactNames(version, arch, revision);
   const main = path.join(output, "build/main/main.js");
   const preload = path.join(output, "build/preload/preload-bundle.js");
   let mainSource = await readFile(main, "utf8");
@@ -129,7 +131,7 @@ export async function patchApp({ output, arch = "x64" }) {
       appId: "com.cron.electron",
       electronVersion: upstream.electronVersion,
       productName: "Norc",
-      buildNumber: "1",
+      buildNumber: String(revision),
       linux: {
         target: TARGETS,
         category: "Office;Calendar",
@@ -175,6 +177,7 @@ export async function patchApp({ output, arch = "x64" }) {
 }
 cli(import.meta.url, async () => {
   const options = parseOptions();
-  if (options.help) console.info("npm run patch -- [--output DIRECTORY] [--arch x64|arm64]");
+  if (options.help)
+    console.info("npm run patch -- [--output DIRECTORY] [--arch x64|arm64] [--revision N]");
   else await patchApp(options);
 });

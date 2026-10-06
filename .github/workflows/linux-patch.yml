@@ -1,0 +1,91 @@
+name: Release Linux patch
+
+on:
+  push:
+    tags: ["v*-linux.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Linux patch tag, e.g. v1.139.0-linux.2 (revision must increase)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: norc-releases
+      cancel-in-progress: false
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Plan the package revision and pin the upstream source
+        id: plan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: node scripts/linux-release.mjs "$RELEASE_TAG"
+      - name: Use the original source when retrying an existing tag
+        if: steps.plan.outputs.available == 'true' && steps.plan.outputs.tag-exists == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+      - name: Install tagged build dependencies
+        if: steps.plan.outputs.available == 'true' && steps.plan.outputs.tag-exists == 'true'
+        run: npm ci
+      - name: Validate the version, formatting and tests
+        if: steps.plan.outputs.available == 'true'
+        run: |
+          npm run release:check -- "$RELEASE_TAG"
+          npm run format:check
+          npm test
+      - name: Install packaging dependencies
+        if: steps.plan.outputs.available == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y 7zip libarchive-tools rpm
+      - name: Record the release source
+        if: steps.plan.outputs.available == 'true'
+        run: echo "NORC_SOURCE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Build RPM, DEB and Pacman packages from the pinned upstream bundle
+        if: steps.plan.outputs.available == 'true'
+        env:
+          UPSTREAM_URL: ${{ steps.plan.outputs.download-url }}
+          UPSTREAM_SHA256: ${{ steps.plan.outputs.dmg-sha256 }}
+        run: npm run build -- --arch x64 --url "$UPSTREAM_URL" --release-tag "$RELEASE_TAG" --upstream-sha256 "$UPSTREAM_SHA256"
+      - uses: actions/upload-artifact@v4
+        if: steps.plan.outputs.available == 'true'
+        with:
+          name: norc-${{ steps.plan.outputs.tag }}-x64
+          if-no-files-found: error
+          path: |
+            out/release/norc_*.deb
+            out/release/norc-*.pkg.tar.xz
+            out/release/norc-*.rpm
+            out/release/build-info.json
+            out/release/SHA256SUMS
+      - name: Push the verified source tag for a manual release
+        if: steps.plan.outputs.available == 'true' && steps.plan.outputs.tag-exists != 'true'
+        run: |
+          git tag -a "$RELEASE_TAG" -m "Norc $RELEASE_TAG"
+          git push origin "refs/tags/$RELEASE_TAG"
+      - name: Publish the release or resume an interrupted draft
+        if: steps.plan.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: node scripts/release.mjs publish "$RELEASE_TAG" --directory out/release --resume-draft

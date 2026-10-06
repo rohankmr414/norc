@@ -48,16 +48,38 @@ export function validateArchitecture(arch) {
     throw new Error(`Unsupported architecture: ${arch}; use x64 or arm64`);
   return arch;
 }
-export function artifactNames(version, arch) {
+export function validateRevision(value) {
+  if (!/^[1-9]\d*$/.test(String(value)) || !Number.isSafeInteger(Number(value))) {
+    throw new Error(`Expected a positive integer package revision, got ${JSON.stringify(value)}`);
+  }
+  return Number(value);
+}
+export function releaseTag(version, revision = 1) {
   validateVersion(version);
+  revision = validateRevision(revision);
+  return revision === 1 ? `v${version}` : `v${version}-linux.${revision}`;
+}
+export function releaseIdentity(tag) {
+  if (typeof tag !== "string" || !tag.startsWith("v"))
+    throw new Error("Expected a versioned release tag starting with v");
+  const match = /^(v.+)-linux\.([0-9]+)$/.exec(tag);
+  const version = validateVersion(match ? match[1].slice(1) : tag.slice(1));
+  const revision = match ? validateRevision(match[2]) : 1;
+  if (match && revision < 2)
+    throw new Error("Linux patch tags must use package revision 2 or greater");
+  return { version, revision };
+}
+export function artifactNames(version, arch, revision = 1) {
+  validateVersion(version);
+  revision = validateRevision(revision);
   const architectures = ARCHITECTURES[validateArchitecture(arch)];
   // Match electron-builder's distro-specific version normalization.
   const nativeVersion = version.replaceAll("-", "~");
   const pacmanVersion = version.replaceAll("-", "_");
   return {
-    deb: `norc_${nativeVersion}-1_${architectures.deb}.deb`,
-    rpm: `norc-${nativeVersion}-1.${architectures.rpm}.rpm`,
-    pacman: `norc-${pacmanVersion}-1-${architectures.pacman}.pkg.tar.xz`,
+    deb: `norc_${nativeVersion}-${revision}_${architectures.deb}.deb`,
+    rpm: `norc-${nativeVersion}-${revision}.${architectures.rpm}.rpm`,
+    pacman: `norc-${pacmanVersion}-${revision}-${architectures.pacman}.pkg.tar.xz`,
   };
 }
 export async function run(command, args, options = {}) {
@@ -85,11 +107,14 @@ export function parseOptions(args = process.argv.slice(2)) {
       "electron-dist": { type: "string" },
       help: { type: "boolean" },
       "release-tag": { type: "string" },
+      revision: { type: "string" },
+      "upstream-sha256": { type: "string" },
     },
   });
   if (values.x64 && values.arm64) throw new Error("Choose one architecture per build");
   values.arch = values.arm64 ? "arm64" : values.x64 ? "x64" : values.arch;
   validateArchitecture(values.arch);
+  if (values.revision !== undefined) values.revision = validateRevision(values.revision);
   values.output = path.resolve(values.output);
   return { ...values, targets: positionals.length ? positionals : TARGETS };
 }

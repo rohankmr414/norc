@@ -76,8 +76,11 @@ and the npm lockfile are excluded.
 
 ## Releases
 
-Package versions and tags mirror upstream: Notion Calendar `1.139.0` produces
-Norc `1.139.0` with tag `v1.139.0`.
+The app version mirrors upstream: Notion Calendar `1.139.0` produces Norc
+`1.139.0`. Its first Linux release uses tag `v1.139.0` and package revision `1`.
+Linux-only fixes increase the package revision: tag `v1.139.0-linux.2` produces
+`norc-1.139.0-2.x86_64.rpm` (and matching DEB/Pacman packages), while the app
+still reports `1.139.0`. A new upstream version starts again at revision `1`.
 
 The [upstream workflow](.github/workflows/upstream.yml) checks every six hours
 and can also run manually. For a new version, it refreshes the icons, runs tests,
@@ -87,8 +90,22 @@ published release.
 
 The [build workflow](.github/workflows/build.yml) runs for branch pushes and pull
 requests, skipping Markdown-only changes. Manual runs remain available.
-Pushing a `v<version>` tag also publishes a release; the tag must match both
+Pushing a `v<version>` tag publishes an upstream release; the tag must match both
 `package.json` and the downloaded upstream version.
+
+For Linux patches, run [Release Linux patch](.github/workflows/linux-patch.yml)
+manually on the branch containing the fixes and enter the next revision tag,
+or push that tag:
+
+```sh
+git tag -a v1.139.0-linux.2 -m "Norc v1.139.0-linux.2"
+git push origin v1.139.0-linux.2
+```
+
+Patch builds reuse the upstream URL and checksum recorded in the original
+release's `build-info.json`. Published assets are never overwritten; interrupted
+drafts can be retried from their original tag. Ordinary branch pushes do not
+publish patch releases. To build locally, use `npm run build -- --revision 2`.
 
 To check upstream without publishing:
 

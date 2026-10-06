@@ -68,7 +68,12 @@ export async function extractIcons(source, destination) {
   for (const [size, image] of images)
     await writeFile(path.join(destination, `${size}x${size}.png`), image);
 }
-export async function prepareApp({ output, dmg, url = DOWNLOAD_URL }) {
+export async function prepareApp({
+  output,
+  dmg,
+  url = DOWNLOAD_URL,
+  "upstream-sha256": expectedHash,
+}) {
   output = path.resolve(output);
   if (await exists(output))
     throw new Error(`${output} already exists; choose --output or build with --reuse`);
@@ -88,6 +93,13 @@ export async function prepareApp({ output, dmg, url = DOWNLOAD_URL }) {
         throw new Error(`Download failed: HTTP ${response.status}`);
       resolvedUrl = response.url;
       await pipeline(Readable.fromWeb(response.body), createWriteStream(archive));
+    }
+    const dmgSha256 = await hashFile(archive);
+    if (
+      expectedHash !== undefined &&
+      (!/^[a-f0-9]{64}$/.test(expectedHash) || dmgSha256 !== expectedHash)
+    ) {
+      throw new Error("Downloaded upstream DMG does not match the pinned release checksum");
     }
     const resources = path.join(work, "resources");
     await run(sevenZip, [
@@ -125,7 +137,7 @@ export async function prepareApp({ output, dmg, url = DOWNLOAD_URL }) {
       electronVersion,
       sourceUrl: dmg ? null : url,
       resolvedUrl,
-      dmgSha256: await hashFile(archive),
+      dmgSha256,
     });
     await rename(staged, output);
     console.info(`Extracted Notion Calendar ${version} to ${output} (Electron ${electronVersion})`);

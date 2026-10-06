@@ -20,3 +20,16 @@ export async function githubGet(
   if (!response.ok) throw new Error(`GitHub API failed: HTTP ${response.status} (${endpoint})`);
   return response.json();
 }
+
+export async function githubReleases(options = {}) {
+  const releases = [];
+  for (let page = 1; ; page++) {
+    const batch = await githubGet(
+      `releases?per_page=100${page === 1 ? "" : `&page=${page}`}`,
+      options,
+    );
+    if (!Array.isArray(batch)) throw new Error("Invalid GitHub release list");
+    releases.push(...batch);
+    if (batch.length < 100) return releases;
+  }
+}

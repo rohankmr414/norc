@@ -47,6 +47,22 @@ test("already published versions and upstream rollbacks are skipped; drafts and 
   const preview = upstreamFromUrl(downloadUrl.replace("1.139.0", "1.140.0-beta.1"));
   assert.equal(planUpdate(preview, [{ tag_name: "v1.139.0", draft: false }]).available, true);
 });
+test("Linux patch releases count as the same upstream version and prevent upstream rollbacks", () => {
+  assert.equal(
+    planUpdate(upstream, [{ tag_name: "v1.139.0-linux.2", draft: false }]).available,
+    false,
+  );
+  assert.equal(
+    planUpdate(upstream, [{ tag_name: "v1.140.0-linux.2", draft: false }]).available,
+    false,
+  );
+  const next = upstreamFromUrl(downloadUrl.replace("1.139.0", "1.140.0"));
+  assert.equal(planUpdate(next, [{ tag_name: "v1.139.0-linux.99", draft: false }]).available, true);
+  assert.equal(
+    planUpdate(upstream, [{ tag_name: "v1.139.0-linux.2", draft: true }]).available,
+    true,
+  );
+});
 test("GitHub errors stop the check; only an explicitly allowed 404 means absence", async () => {
   const options = { repo: "owner/norc", fetchImpl: async () => ({ ok: false, status: 404 }) };
   assert.equal(await githubGet("releases/tags/v1.139.0", { ...options, allowMissing: true }), null);
