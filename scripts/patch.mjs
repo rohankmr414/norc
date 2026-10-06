@@ -56,6 +56,14 @@ export async function patchApp({ output, arch = "x64" }) {
   mainSource = replaceOnce(mainSource, /([\w$]+)\(\)\.openAsHidden&&([\w$]+)\(\)&&!([\w$]+)/g,
     "(process.platform===`linux`?process.argv.includes(`--norc-start-hidden`):$1().openAsHidden)&&$2()&&!$3", "background autostart",
     /\(process\.platform===`linux`\?process\.argv\.includes\(`--norc-start-hidden`\):[\w$]+\(\)\.openAsHidden\)&&[\w$]+\(\)&&![\w$]+/g);
+  // Quick Look is macOS-only. Linux renders diagnostic text in a read-only
+  // window and avoids writing string attachments into the system temp folder.
+  mainSource = replaceOnce(mainSource,
+    /(function [\w$]+\(([\w$]+)\)\{)(?:if\(process\.platform===`linux`\)return require\(`\.\/file-preview\.js`\)\.previewFromString\([\w$]+,[\w$]+\);)?(if\(!([\w$]+)\)return;let [\w$]+=[\w$.]+\.app\.getPath\(([`"'])temp\5\)[^;]+;[\w$.]+\.writeFileSync\([\w$]+,\2\.content\),[\w$.]+\.existsSync\([\w$]+\)&&\4\.previewFile\([\w$]+,\2\.name\)\})/g,
+    "$1if(process.platform===`linux`)return require(`./file-preview.js`).previewFromString($4,$2);$3", "feedback attachment preview");
+  mainSource = replaceOnce(mainSource,
+    /(function [\w$]+\(\{path:([\w$]+),name:([\w$]+)\}\)\{)(?:if\(process\.platform===`linux`\)return require\(`\.\/file-preview\.js`\)\.previewFromPath\([\w$]+,\{path:[\w$]+,name:[\w$]+\}\);)?([\w$]+)\?\.previewFile\(\2,\3\)\}/g,
+    "$1if(process.platform===`linux`)return require(`./file-preview.js`).previewFromPath($4,{path:$2,name:$3});$4?.previewFile($2,$3)}", "file attachment preview");
   const rpmScripts = await prepareRpmScripts(output);
   Object.assign(data, {
     name: "norc", productName: "Norc", desktopName: "norc.desktop", version,
@@ -88,7 +96,7 @@ export async function patchApp({ output, arch = "x64" }) {
   await writeJson(path.join(output, "build/main/upstream.json"), upstream);
   await copyFile(path.join(ROOT, "linux.js"), path.join(output, "build/main/linux.js"));
   await copyFile(path.join(ROOT, "system-settings.js"), path.join(output, "build/main/system-settings.js"));
-  for (const filename of ["autostart.js", "desktop-entry.js", "protocol-handlers.js", "calendar-files.js"]) {
+  for (const filename of ["autostart.js", "desktop-entry.js", "protocol-handlers.js", "calendar-files.js", "file-preview.js", "update-links.js"]) {
     await copyFile(path.join(ROOT, filename), path.join(output, "build/main", filename));
   }
   await writeJson(manifest, data);

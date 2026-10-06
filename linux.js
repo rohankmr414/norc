@@ -1,5 +1,5 @@
 // Linux entry point for the upstream Notion Calendar desktop application.
-const { app, BrowserWindow, dialog, ipcMain, net } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, net, shell } = require("electron");
 const path = require("node:path");
 
 if (process.platform !== "linux") {
@@ -46,6 +46,13 @@ if (process.platform !== "linux") {
   autoUpdater.checkForUpdates = async () => null;
   autoUpdater.downloadUpdate = async () => [];
   autoUpdater.quitAndInstall = () => {};
+
+  // Upstream's manual Download button opens the official desktop download
+  // page. Route those links to Norc's releases through the shared opener,
+  // covering IPC, navigation and new-window links before upstream loads.
+  const { linuxUpdateUrl } = require("./update-links.js");
+  const openExternal = shell.openExternal.bind(shell);
+  shell.openExternal = (url, options) => openExternal(linuxUpdateUrl(url), options);
 
   // The upstream System Settings button calls this macOS/Windows-only helper.
   // Keep its IPC path and supply a desktop-aware Linux implementation.

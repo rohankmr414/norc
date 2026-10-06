@@ -8,6 +8,7 @@ const { calendarFileArguments } = require("../calendar-files.js");
 const source = fs.readFileSync(path.join(__dirname, "../linux.js"), "utf8");
 
 function setup({ lock = true, argv = [], minimumVersion = "1.137.0", settingsError, autostartError,
+  platform = "linux", openExternal = async () => {},
   workingDirectory = "/launch", readCalendarFile = async filename => ({ path: filename, contents: "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n" }) } = {}) {
   const app = new EventEmitter();
   app.userAgentFallback = "Mozilla/5.0 (X11; Linux x86_64) Chrome/146.0 Norc/1.139.0 Electron/41.5.0";
@@ -38,13 +39,19 @@ function setup({ lock = true, argv = [], minimumVersion = "1.137.0", settingsErr
     },
   };
   const dialog = { showMessageBox: async options => { settingsMessages.push(options); } };
+  const externalCalls = [];
+  const shell = { openExternal(url, options) {
+    externalCalls.push({ url, options });
+    return openExternal.call(this, url, options);
+  } };
   let loaded = false;
   const context = {
-    process: { platform: "linux", argv, env: {}, execPath: "/opt/Norc/norc-bin", cwd: () => workingDirectory }, console, AbortSignal, URL,
+    process: { platform, argv, env: {}, execPath: "/opt/Norc/norc-bin", cwd: () => workingDirectory }, console, AbortSignal, URL,
     require(name) {
-      if (name === "electron") return { app, dialog, ipcMain, net, BrowserWindow: { getAllWindows: () => windows } };
+      if (name === "electron") return { app, dialog, ipcMain, net, shell, BrowserWindow: { getAllWindows: () => windows } };
       if (name === "electron-updater") return { autoUpdater };
       if (name === "electron-util") return electronUtil;
+      if (name === "./update-links.js") return require("../update-links.js");
       if (name === "./calendar-files.js") return { calendarFileArguments, readCalendarFile: async filename => {
         fileReads.push(filename);
         return readCalendarFile(filename);
@@ -83,10 +90,39 @@ function setup({ lock = true, argv = [], minimumVersion = "1.137.0", settingsErr
     app.emit("browser-window-created", {}, window);
     return window;
   }
-  return { app, ipcMain, autoUpdater, electronUtil, settingsCalls, settingsMessages, autostartCalls, fileReads, loaded, createWindow, context, handlers };
+  return { app, ipcMain, autoUpdater, electronUtil, shell, externalCalls, settingsCalls, settingsMessages, autostartCalls, fileReads, loaded, createWindow, context, handlers };
 }
 
 const flush = () => new Promise(resolve => setImmediate(resolve));
+
+test("Linux opens manual updates in Norc releases and preserves the external opener's contract", async () => {
+  const result = Promise.resolve("opened");
+  let receiver;
+  const state = setup({ openExternal() { receiver = this; return result; } });
+  const options = { activate: true };
+  assert.equal(state.shell.openExternal("https://www.notion.com/product/calendar/download/desktop", options), result);
+  assert.equal(await result, "opened");
+  assert.equal(receiver, state.shell);
+  assert.deepEqual(state.externalCalls, [{ url: "https://github.com/rohankmr414/norc/releases/latest", options }]);
+  await state.shell.openExternal("https://meet.google.com/abc-defg-hij", options);
+  assert.equal(state.externalCalls[1].url, "https://meet.google.com/abc-defg-hij");
+});
+
+test("external opening failures remain observable to the caller", async () => {
+  const error = new Error("No default browser");
+  const state = setup({ openExternal: async () => { throw error; } });
+  await assert.rejects(state.shell.openExternal("https://www.notion.com/product/calendar/download/desktop"), error);
+});
+
+test("macOS and Windows keep their upstream download links", async () => {
+  for (const platform of ["darwin", "win32"]) {
+    const state = setup({ platform });
+    const url = "https://www.notion.com/product/calendar/download/desktop";
+    await state.shell.openExternal(url);
+    assert.equal(state.externalCalls[0].url, url);
+    assert.equal(state.loaded, true);
+  }
+});
 
 test("a real local calendar file reaches the bridge's importer with its unchanged contents", async t => {
   const fsp = require("node:fs/promises");

@@ -13,6 +13,7 @@ import { syncIcons } from "../scripts/icons.mjs";
 
 const reminderSource = 'const fullScreen=false;function reminderOptions(){return {type:`panel`,alwaysOnTop:!0,focusable:reminderFocusable()}}function reminderFocusable(){return process.platform===`darwin`?!fullScreen:!0}function reminderPosition(position){return position??(process.platform===`darwin`?`topRight`:`bottomRight`)}';
 const integrationSource = 'function allowed(e){return [`notion`,`zoommtg`].includes(e)}async function macHandler(e){return `mac:${e}`}async function windowsHandler(e){return `windows:${e}`}async function protocolRegistered(e){return allowed(e)?process.platform===`darwin`?macHandler(e):process.platform===`win32`?windowsHandler(e):!1:!1}function legacyLogin(){return !1}function loginSettings(){let settings=loginApp.getLoginItemSettings();return legacyLogin()||(settings.openAsHidden=preferences.get(hiddenKey)===!0),settings}function launchedAtLogin(){return process.argv.includes(`--from-login`)}const startupHandled=false;function startupHidden(){return loginSettings().openAsHidden&&launchedAtLogin()&&!startupHandled}';
+const previewSource = 'function previewString(e){if(!previewParent)return;let t=previewElectron.app.getPath(`temp`),n=previewPathLib.resolve(t,`attachment.json`);previewFs.writeFileSync(n,e.content),previewFs.existsSync(n)&&previewParent.previewFile(n,e.name)}function previewPath({path:e,name:t}){previewParent?.previewFile(e,t)}';
 
 async function fixture(t) {
   const output = await mkdtemp(path.join(os.tmpdir(), "norc-test-"));
@@ -25,7 +26,7 @@ async function fixture(t) {
   });
   await writeJson(path.join(output, ".norc-upstream.json"), { version: "1.139.0", electronVersion: "41.5.0" });
   await writeFile(path.join(output, "build/main/main.js"),
-    'const options={title:`Cron`};process.platform===`darwin`;process.platform===`win32`;' + reminderSource + integrationSource);
+    'const options={title:`Cron`};process.platform===`darwin`;process.platform===`win32`;' + reminderSource + integrationSource + previewSource);
   await writeFile(path.join(output, "build/preload/preload-bundle.js"),
     'const windows=process.platform===`win32`;const api={usesNativeMacOsTrafficLight:!0};');
   return output;
@@ -63,7 +64,7 @@ test("packages preserve the Norc identity, upstream version, runtime and OAuth p
   assert.equal((await readJson(path.join(output, "build/main/upstream.json"))).version, "1.139.0");
   assert.match(await readFile(path.join(output, "build/main/main.js"), "utf8"), /title:`Norc`.*platform===`darwin`/);
   assert.match(await readFile(path.join(output, "build/preload/preload-bundle.js"), "utf8"), /platform===`linux`/);
-  for (const filename of ["autostart.js", "desktop-entry.js", "protocol-handlers.js", "calendar-files.js"]) {
+  for (const filename of ["autostart.js", "desktop-entry.js", "protocol-handlers.js", "calendar-files.js", "file-preview.js", "update-links.js"]) {
     assert.equal(await readFile(path.join(output, "build/main", filename), "utf8"), await readFile(new URL(`../${filename}`, import.meta.url), "utf8"));
   }
 });
@@ -96,6 +97,51 @@ test("protocol patch uses Linux lookup while preserving the allowlist and upstre
     assert.equal(await vm.runInContext('protocolRegistered("notion")', context), expected);
     assert.equal(await vm.runInContext('protocolRegistered("javascript")', context), false);
     assert.deepEqual(calls, platform === "linux" ? ["notion"] : []);
+  }
+});
+test("attachment previews use the Linux viewer and preserve the upstream preview on other platforms", async t => {
+  const output = await fixture(t);
+  await patchApp({ output });
+  const source = await readFile(path.join(output, "build/main/main.js"), "utf8");
+  for (const platform of ["linux", "darwin", "win32"]) {
+    const previews = [], nativePreviews = [], writes = [];
+    const parent = { previewFile: (...args) => nativePreviews.push(args) };
+    const context = vm.createContext({
+      process: { platform }, previewParent: parent, previewPathLib: path,
+      previewElectron: { app: { getPath: () => "/tmp" } },
+      previewFs: { writeFileSync: (...args) => writes.push(args), existsSync: () => true },
+      require: filename => {
+        assert.equal(filename, "./file-preview.js");
+        return {
+          previewFromString: (owner, attachment) => { assert.equal(owner, parent); previews.push(["string", { ...attachment }]); },
+          previewFromPath: (owner, attachment) => { assert.equal(owner, parent); previews.push(["path", { ...attachment }]); },
+        };
+      },
+    });
+    vm.runInContext(source, context);
+    await vm.runInContext('previewString({name:"debug.json",content:"{}",contentType:"application/json"})', context);
+    await vm.runInContext('previewPath({path:"/existing/debug.json",name:"Existing diagnostic"})', context);
+    assert.deepEqual(previews, platform === "linux" ? [
+      ["string", { name: "debug.json", content: "{}", contentType: "application/json" }],
+      ["path", { path: "/existing/debug.json", name: "Existing diagnostic" }],
+    ] : []);
+    assert.deepEqual(writes, platform === "linux" ? [] : [["/tmp/attachment.json", "{}"]]);
+    assert.deepEqual(nativePreviews, platform === "linux" ? [] : [
+      ["/tmp/attachment.json", "debug.json"], ["/existing/debug.json", "Existing diagnostic"],
+    ]);
+  }
+});
+test("changed attachment preview hooks fail before modifying the extraction", async t => {
+  for (const [original, changed, error] of [
+    ["writeFileSync(n,e.content)", "writeFileSync(n,e.data)", /feedback attachment preview changed/],
+    ["previewParent?.previewFile(e,t)", "previewParent?.previewFile(e)", /file attachment preview changed/],
+  ]) {
+    const output = await fixture(t);
+    const main = path.join(output, "build/main/main.js");
+    await writeFile(main, (await readFile(main, "utf8")).replace(original, changed));
+    const before = await snapshot(output);
+    await assert.rejects(patchApp({ output }), error);
+    assert.deepEqual(await snapshot(output), before);
   }
 });
 test("Linux startup reads the actual hidden preference instead of upstream's cached value", async (t) => {
