@@ -14,11 +14,18 @@ import { syncIcons } from "../scripts/icons.mjs";
 const reminderSource =
   "const fullScreen=false;function reminderOptions(){return {type:`panel`,alwaysOnTop:!0,focusable:reminderFocusable()}}function reminderFocusable(){return process.platform===`darwin`?!fullScreen:!0}function reminderPosition(position){return position??(process.platform===`darwin`?`topRight`:`bottomRight`)}";
 const integrationSource =
-  "function allowed(e){return [`notion`,`zoommtg`].includes(e)}async function macHandler(e){return `mac:${e}`}async function windowsHandler(e){return `windows:${e}`}async function protocolRegistered(e){return allowed(e)?process.platform===`darwin`?macHandler(e):process.platform===`win32`?windowsHandler(e):!1:!1}function legacyLogin(){return !1}function loginSettings(){let settings=loginApp.getLoginItemSettings();return legacyLogin()||(settings.openAsHidden=preferences.get(hiddenKey)===!0),settings}function launchedAtLogin(){return process.argv.includes(`--from-login`)}const startupHandled=false;function startupHidden(){return loginSettings().openAsHidden&&launchedAtLogin()&&!startupHandled}";
+  "function allowed(e){return [`notion`,`zoommtg`].includes(e)}async function macHandler(e){return `mac:${e}`}async function windowsHandler(e){return `windows:${e}`}async function protocolRegistered(e){return allowed(e)?process.platform===`darwin`?macHandler(e):process.platform===`win32`?windowsHandler(e):!1:!1}function launchedAtLogin(){return process.argv.includes(`--from-login`)}const startupHandled=false;function startupHidden(){return loginSettings().openAsHidden&&launchedAtLogin()&&!startupHandled}";
+const loginSources = {
+  legacy:
+    "function legacyLogin(){return !1}function loginSettings(){let settings=loginApp.getLoginItemSettings();return legacyLogin()||(settings.openAsHidden=preferences.get(hiddenKey)===!0),settings}",
+  // Notion Calendar 1.142.0: spread-based getter and a setter without openAsHidden.
+  current:
+    "const startArgs=`--process-start-args`,loginFlag=`--from-login`;function loginSettings(){return{...loginApp.getLoginItemSettings({args:[startArgs,loginFlag]}),openAsHidden:preferences.get(hiddenKey)===!0}}function setLoginSettings({openAtLogin:n,openAsHidden:r}){let i=loginSettings();(i.openAtLogin!==n||i.openAsHidden!==r)&&(loginApp.setLoginItemSettings({openAtLogin:n,args:[startArgs,loginFlag]}),preferences.set(hiddenKey,r),preferences.set(configuredKey,!0))}",
+};
 const previewSource =
   "function previewString(e){if(!previewParent)return;let t=previewElectron.app.getPath(`temp`),n=previewPathLib.resolve(t,`attachment.json`);previewFs.writeFileSync(n,e.content),previewFs.existsSync(n)&&previewParent.previewFile(n,e.name)}function previewPath({path:e,name:t}){previewParent?.previewFile(e,t)}";
 
-async function fixture(t) {
+async function fixture(t, loginSource = loginSources.legacy) {
   const output = await mkdtemp(path.join(os.tmpdir(), "norc-test-"));
   t.after(() => rm(output, { recursive: true, force: true }));
   await mkdir(path.join(output, "build/main"), { recursive: true });
@@ -39,6 +46,7 @@ async function fixture(t) {
     "const options={title:`Cron`};process.platform===`darwin`;process.platform===`win32`;" +
       reminderSource +
       integrationSource +
+      loginSource +
       previewSource,
   );
   await writeFile(
@@ -104,6 +112,55 @@ test("packages preserve the Norc identity, upstream version, runtime and OAuth p
       await readFile(path.join(output, "build/main", filename), "utf8"),
       await readFile(new URL(`../${filename}`, import.meta.url), "utf8"),
     );
+  }
+});
+test("upstream catalog references resolve for npm without changing explicit dependency versions", async (t) => {
+  const output = await fixture(t);
+  const manifest = path.join(output, "package.json");
+  const data = await readJson(manifest);
+  data.dependencies["electron-context-menu"] = "catalog:";
+  data.optionalDependencies = { example: "catalog:default" };
+  data.peerDependencies = { other: "catalog:compat" };
+  // Upstream development dependencies are replaced by the matching Electron.
+  data.devDependencies = { unused: "catalog:missing" };
+  await writeJson(manifest, data);
+  const workspace = path.join(output, "pnpm-workspace.yaml");
+  await writeFile(
+    workspace,
+    "catalog:\n  electron-context-menu: 5.1.0\n  electron-store: 99.0.0\n  example: ^2.0.0\ncatalogs:\n  compat:\n    other: ~3.0.0\n",
+  );
+  await patchApp({ output });
+  const patched = await readJson(manifest);
+  assert.deepEqual(patched.dependencies, {
+    "electron-store": "5.2.0",
+    "electron-context-menu": "5.1.0",
+  });
+  assert.deepEqual(patched.optionalDependencies, { example: "^2.0.0" });
+  assert.deepEqual(patched.peerDependencies, { other: "~3.0.0" });
+  assert.deepEqual(patched.devDependencies, { electron: "41.5.0" });
+  // Reusing a resolved extraction no longer needs its workspace catalog.
+  await rm(workspace);
+  const first = await snapshot(output);
+  await patchApp({ output });
+  assert.deepEqual(await snapshot(output), first);
+});
+test("invalid upstream catalogs fail before modifying the extraction", async (t) => {
+  for (const [workspace, error] of [
+    [null, /pnpm-workspace\.yaml/],
+    ["catalog: {}\n", /Invalid upstream catalog version/],
+    ["catalog:\n  electron-context-menu: 5\n", /Invalid upstream catalog version/],
+    ['catalog:\n  electron-context-menu: "catalog:"\n', /Invalid upstream catalog version/],
+    ["catalog: [\n", /unexpected end/],
+  ]) {
+    const output = await fixture(t);
+    const manifest = path.join(output, "package.json");
+    const data = await readJson(manifest);
+    data.dependencies["electron-context-menu"] = "catalog:";
+    await writeJson(manifest, data);
+    if (workspace !== null) await writeFile(path.join(output, "pnpm-workspace.yaml"), workspace);
+    const before = await snapshot(output);
+    await assert.rejects(patchApp({ output }), error);
+    assert.deepEqual(await snapshot(output), before);
   }
 });
 test("desktop integration advertises calendar files and retains OAuth URL arguments", async (t) => {
@@ -236,44 +293,103 @@ test("changed attachment preview hooks fail before modifying the extraction", as
     assert.deepEqual(await snapshot(output), before);
   }
 });
-test("Linux startup reads the actual hidden preference instead of upstream's cached value", async (t) => {
-  const output = await fixture(t);
+for (const [layout, loginSource] of Object.entries(loginSources)) {
+  test(`${layout} login settings preserve Linux's actual hidden preference and upstream behavior elsewhere`, async (t) => {
+    const output = await fixture(t, loginSource);
+    await patchApp({ output });
+    const source = await readFile(path.join(output, "build/main/main.js"), "utf8");
+    for (const platform of ["linux", "darwin", "win32"]) {
+      for (const hidden of [false, true]) {
+        const calls = [];
+        const context = vm.createContext({
+          process: { platform },
+          hiddenKey: "hidden",
+          preferences: { get: () => !hidden },
+          loginApp: {
+            getLoginItemSettings: (options) => {
+              calls.push(options);
+              return { openAtLogin: true, openAsHidden: hidden, wasOpenedAtLogin: true };
+            },
+          },
+        });
+        vm.runInContext(source, context);
+        const settings = vm.runInContext("loginSettings()", context);
+        assert.equal(settings.openAsHidden, platform === "linux" ? hidden : !hidden);
+        assert.equal(settings.openAtLogin, true);
+        assert.equal(settings.wasOpenedAtLogin, true);
+        assert.equal(calls.length, 1);
+        if (layout === "current") {
+          assert.deepEqual(Array.from(calls[0].args), ["--process-start-args", "--from-login"]);
+        }
+      }
+    }
+    const first = await snapshot(output);
+    await patchApp({ output });
+    assert.deepEqual(await snapshot(output), first);
+  });
+  test(`${layout} background startup follows launch flags without hiding normal or visible login launches`, async (t) => {
+    const output = await fixture(t, loginSource);
+    await patchApp({ output });
+    const source = await readFile(path.join(output, "build/main/main.js"), "utf8");
+    for (const [argv, expected] of [
+      [["norc"], false],
+      [["norc", "--from-login"], false],
+      [["norc", "--norc-start-hidden"], false],
+      [["norc", "--from-login", "--norc-start-hidden"], true],
+    ]) {
+      const context = vm.createContext({
+        process: { platform: "linux", argv },
+        loginApp: { getLoginItemSettings: () => ({ openAsHidden: false }) },
+      });
+      vm.runInContext(source, context);
+      assert.equal(vm.runInContext("startupHidden()", context), expected);
+    }
+  });
+}
+test("current login setter forwards hidden startup to Linux and preserves other platforms' options", async (t) => {
+  const output = await fixture(t, loginSources.current);
   await patchApp({ output });
   const source = await readFile(path.join(output, "build/main/main.js"), "utf8");
   for (const platform of ["linux", "darwin", "win32"]) {
-    const context = vm.createContext({
-      process: { platform },
-      hiddenKey: "hidden",
-      preferences: { get: () => false },
-      loginApp: {
-        getLoginItemSettings: () => ({
+    for (const hidden of [false, true]) {
+      const calls = [];
+      const preferences = new Map([["hidden", !hidden]]);
+      const context = vm.createContext({
+        process: { platform },
+        hiddenKey: "hidden",
+        configuredKey: "configured",
+        preferences,
+        loginApp: {
+          getLoginItemSettings: () => ({ openAtLogin: true, openAsHidden: !hidden }),
+          setLoginItemSettings: (options) => calls.push(JSON.parse(JSON.stringify(options))),
+        },
+      });
+      vm.runInContext(source, context);
+      // Changing only the hidden preference must update the desktop entry too.
+      vm.runInContext(`setLoginSettings({openAtLogin:true,openAsHidden:${hidden}})`, context);
+      assert.deepEqual(calls, [
+        {
           openAtLogin: true,
-          openAsHidden: true,
-          wasOpenedAtLogin: true,
-        }),
-      },
-    });
-    vm.runInContext(source, context);
-    assert.equal(vm.runInContext("loginSettings().openAsHidden", context), platform === "linux");
-    assert.equal(vm.runInContext("loginSettings().wasOpenedAtLogin", context), true);
+          ...(platform === "linux" ? { openAsHidden: hidden } : {}),
+          args: ["--process-start-args", "--from-login"],
+        },
+      ]);
+      assert.equal(preferences.get("hidden"), hidden);
+      assert.equal(preferences.get("configured"), true);
+    }
   }
 });
-test("Linux background startup follows launch flags without hiding normal or visible login launches", async (t) => {
-  const output = await fixture(t);
-  await patchApp({ output });
-  const source = await readFile(path.join(output, "build/main/main.js"), "utf8");
-  for (const [argv, expected] of [
-    [["norc"], false],
-    [["norc", "--from-login"], false],
-    [["norc", "--norc-start-hidden"], false],
-    [["norc", "--from-login", "--norc-start-hidden"], true],
+test("changed or duplicate login hooks fail before modifying the extraction", async (t) => {
+  for (const [loginSource, error] of [
+    [loginSources.legacy.replace("===!0", "===true"), /login-item settings changed/],
+    [loginSources.current.replace("===!0", "===true"), /login-item settings changed/],
+    [loginSources.current.replace("openAtLogin:n,args:", "args:"), /login-item setter changed/],
+    [loginSources.current.repeat(2), /login-item settings changed.*found 2/],
   ]) {
-    const context = vm.createContext({
-      process: { platform: "linux", argv },
-      loginApp: { getLoginItemSettings: () => ({ openAsHidden: false }) },
-    });
-    vm.runInContext(source, context);
-    assert.equal(vm.runInContext("startupHidden()", context), expected);
+    const output = await fixture(t, loginSource);
+    const before = await snapshot(output);
+    await assert.rejects(patchApp({ output }), error);
+    assert.deepEqual(await snapshot(output), before);
   }
 });
 test("changed protocol lookup fails before modifying the extraction", async (t) => {

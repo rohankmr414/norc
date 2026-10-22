@@ -1,5 +1,7 @@
 import { copyFile, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import yaml from "js-yaml";
+import semver from "semver";
 import {
   ROOT,
   TARGETS,
@@ -22,10 +24,34 @@ function replaceOnce(source, pattern, replacement, description, appliedPattern) 
     throw new Error(`Upstream ${description} changed: expected one match, found ${count}`);
   return source.replace(pattern, replacement);
 }
+async function resolveCatalogDependencies(data, output) {
+  // Upstream ships its pnpm catalog, but Linux dependencies are installed by npm.
+  // Only resolve references; explicit versions may intentionally differ from it.
+  let workspace;
+  for (const field of ["dependencies", "optionalDependencies", "peerDependencies"]) {
+    for (const [name, specifier] of Object.entries(data[field] || {})) {
+      if (!specifier.startsWith("catalog:")) continue;
+      workspace ??= yaml.load(await readFile(path.join(output, "pnpm-workspace.yaml"), "utf8"), {
+        schema: yaml.JSON_SCHEMA,
+      });
+      const catalogName = specifier.slice("catalog:".length) || "default";
+      const catalog =
+        catalogName === "default"
+          ? (workspace?.catalog ?? workspace?.catalogs?.default)
+          : workspace?.catalogs?.[catalogName];
+      const version = catalog?.[name];
+      if (typeof version !== "string" || !semver.validRange(version)) {
+        throw new Error(`Invalid upstream catalog version for ${name} (${specifier})`);
+      }
+      data[field][name] = version;
+    }
+  }
+}
 export async function patchApp({ output, arch = "x64", revision = 1 }) {
   revision = validateRevision(revision);
   const manifest = path.join(output, "package.json");
   const data = await readJson(manifest);
+  await resolveCatalogDependencies(data, output);
   const upstream = await readJson(path.join(output, ".norc-upstream.json"));
   validateVersion(upstream.version);
   validateVersion(upstream.electronVersion);
@@ -84,13 +110,32 @@ export async function patchApp({ output, arch = "x64", revision = 1 }) {
     /process\.platform===`linux`\?require\(`\.\/protocol-handlers\.js`\)\.isProtocolRegistered\([\w$]+\):!1:!1/g,
   );
   // Linux reads the hidden-start preference from the actual desktop entry.
-  mainSource = replaceOnce(
-    mainSource,
-    /return ([\w$]+)\(\)\|\|\(([\w$]+)\.openAsHidden=([\w$]+)\.get\(([\w$]+)\)===!0\),\2/g,
-    "return process.platform===`linux`||$1()||($2.openAsHidden=$3.get($4)===!0),$2",
-    "login-item settings",
-    /return process\.platform===`linux`\|\|[\w$]+\(\)\|\|\([\w$]+\.openAsHidden=[\w$]+\.get\([\w$]+\)===!0\),[\w$]+/g,
-  );
+  // In 1.142.0 upstream overlays its cached preference with an object spread
+  // and no longer passes openAsHidden to Electron's setter.
+  if (/return\{\.\.\.[\w$.]+\.getLoginItemSettings\(/.test(mainSource)) {
+    mainSource = replaceOnce(
+      mainSource,
+      /(return\{\.\.\.[\w$.]+\.getLoginItemSettings\(\{args:\[[\w$]+,[\w$]+\]\}\)),openAsHidden:([\w$]+\.get\([\w$]+\)===!0)\}/g,
+      "$1,...(process.platform===`linux`?{}:{openAsHidden:$2})}",
+      "login-item settings",
+      /return\{\.\.\.[\w$.]+\.getLoginItemSettings\(\{args:\[[\w$]+,[\w$]+\]\}\),\.\.\.\(process\.platform===`linux`\?\{\}:\{openAsHidden:[\w$]+\.get\([\w$]+\)===!0\}\)\}/g,
+    );
+    mainSource = replaceOnce(
+      mainSource,
+      /(\.setLoginItemSettings\(\{openAtLogin:[\w$]+),args:(\[[\w$]+,[\w$]+\])\}\),([\w$]+)\.set\(([\w$]+),([\w$]+)\)/g,
+      "$1,...(process.platform===`linux`?{openAsHidden:$5}:{}),args:$2}),$3.set($4,$5)",
+      "login-item setter",
+      /\.setLoginItemSettings\(\{openAtLogin:[\w$]+,\.\.\.\(process\.platform===`linux`\?\{openAsHidden:([\w$]+)\}:\{\}\),args:\[[\w$]+,[\w$]+\]\}\),[\w$]+\.set\([\w$]+,\1\)/g,
+    );
+  } else {
+    mainSource = replaceOnce(
+      mainSource,
+      /return ([\w$]+)\(\)\|\|\(([\w$]+)\.openAsHidden=([\w$]+)\.get\(([\w$]+)\)===!0\),\2/g,
+      "return process.platform===`linux`||$1()||($2.openAsHidden=$3.get($4)===!0),$2",
+      "login-item settings",
+      /return process\.platform===`linux`\|\|[\w$]+\(\)\|\|\([\w$]+\.openAsHidden=[\w$]+\.get\([\w$]+\)===!0\),[\w$]+/g,
+    );
+  }
   // The login launch's explicit flag remains valid if settings change before
   // the renderer becomes ready; normal launches still show the calendar.
   mainSource = replaceOnce(
