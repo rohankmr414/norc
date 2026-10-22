@@ -1,6 +1,6 @@
 {
   "name": "norc",
-  "version": "1.139.0",
+  "version": "1.142.0",
   "private": true,
   "description": "Build tools for unofficial Notion Calendar Linux packages",
   "engines": {

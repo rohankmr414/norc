@@ -1,6 +1,6 @@
 {
-  "version": "1.139.0",
-  "dmgSha256": "32f3a7203c8d9b9b7a27de5a7a1ef65e18e0fa030c754003b1b51ddff0cb7c11",
+  "version": "1.142.0",
+  "dmgSha256": "73ee3996312f3af5954b130b3daddf7418f522e673fe46afa98fcd126db41631",
   "assets": [
     {
       "name": "icon_32x32.png",
